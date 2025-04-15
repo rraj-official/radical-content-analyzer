@@ -156,9 +156,9 @@ export default function CsvAnalyzer() {
               {results.map((result, index) => (
                 <tr key={index} className={index === currentIndex ? 'bg-blue-50' : ''}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    <a href={`/analysis/${result.sts_url}`} target="_blank">
+                    {/* <a href={`/analysis/${result.sts_url}`} target="_blank"> */}
                       {result.url}
-                    </a>
+                    {/* </a> */}
                   </td>
                   <td className="flex justify-center items-center">
                     {result.screenshot_url && (

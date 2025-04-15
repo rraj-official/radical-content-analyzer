@@ -25,6 +25,43 @@ export interface WebsiteAnalysisResult {
   };
 }
 
+// New interface for video analysis
+export interface VideoAnalysisResult {
+  type: "video";
+  analysisId: string;
+  url: string;
+  lastAnalyzedAt: string;
+  feedbackGiven: boolean;
+  success?: boolean;
+  message?: string;
+  inputParameters: {
+    videoThumbnail?: string;
+    videoDuration?: number;
+    videoTitle?: string;
+    transcription?: {
+      english?: string;
+      hindi?: string;
+    };
+  };
+  outputParameters: {
+    radicalProbability: number;
+    radicalContent: number;
+    overallScore: {
+      score: number;
+      label: string;
+      color: string;
+    };
+    lexicalAnalysis: string;
+    emotionAnalysis: string;
+    speechPatterns: string;
+    religiousRhetoric: string;
+    commandsDirectives: string;
+    overallAssessment: string;
+    riskFactors: string[];
+    safetyTips: string[];
+  };
+}
+
 export interface ApkAnalysisResult {
   type: "apk";
   analysisId: string;
@@ -59,7 +96,7 @@ export interface ApkMetadata {
   signatureInfo?: string[];
 }
 
-export type AnalysisResult = WebsiteAnalysisResult | ApkAnalysisResult;
+export type AnalysisResult = WebsiteAnalysisResult | ApkAnalysisResult | VideoAnalysisResult;
 
 // Mock data functions for UI development
 export function getMockWebsiteAnalysis(): WebsiteAnalysisResult {
@@ -85,6 +122,43 @@ export function getMockWebsiteAnalysis(): WebsiteAnalysisResult {
       contentAssessment: "Content appears to make unrealistic promises.",
       redFlags: ["Domain created less than 6 months ago", "Poor grammar and spelling"],
       safetyTips: ["Verify the company through official channels", "Don't share personal information"]
+    }
+  };
+}
+
+// Add a mock function for video analysis
+export function getMockVideoAnalysis(): VideoAnalysisResult {
+  return {
+    type: "video",
+    analysisId: "mock-video-analysis-id",
+    url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    lastAnalyzedAt: new Date().toISOString(),
+    feedbackGiven: false,
+    inputParameters: {
+      videoThumbnail: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      videoDuration: 212,
+      videoTitle: "Example Video Title",
+      transcription: {
+        english: "This is a sample English transcription for testing purposes.",
+        hindi: "यह परीक्षण उद्देश्यों के लिए एक नमूना हिंदी प्रतिलेखन है।"
+      }
+    },
+    outputParameters: {
+      radicalProbability: 45,
+      radicalContent: 30,
+      overallScore: {
+        score: 65,
+        label: "Moderate Concern",
+        color: "amber"
+      },
+      lexicalAnalysis: "The content uses moderate religious terminology but lacks explicit radical terms.",
+      emotionAnalysis: "Emotional tone shifts between neutral and slightly negative when discussing opposing views.",
+      speechPatterns: "Speaker uses repetition to emphasize certain points, but doesn't show extreme intensity.",
+      religiousRhetoric: "References to religious texts are present but not used to justify extreme actions.",
+      commandsDirectives: "Few direct calls to action are present, mostly focused on peaceful practices.",
+      overallAssessment: "The content shows some concerning elements but lacks explicit calls for radical action.",
+      riskFactors: ["Use of exclusionary language", "References to divine punishment"],
+      safetyTips: ["Consider the broader context", "Verify claims with established sources"]
     }
   };
 }
