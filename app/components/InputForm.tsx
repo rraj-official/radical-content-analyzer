@@ -69,7 +69,10 @@ export default function InputForm() {
 
   // Function to get YouTube video info using oEmbed
   const getYoutubeVideoInfo = async (videoId: string) => {
+    console.log("Getting YouTube info for video ID:", videoId);
+    
     try {
+      // First get basic info from oEmbed
       const response = await fetch(
         `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
       );
@@ -77,10 +80,54 @@ export default function InputForm() {
         throw new Error("Failed to fetch video info");
       }
       const data = await response.json();
+      
+      // Now fetch the video duration using the YouTube API
+      try {
+        console.log("Fetching video duration from YouTube API...");
+        console.log("Using API Key:", process.env.NEXT_PUBLIC_YOUTUBE_API_KEY ? "Key exists" : "Key missing");
+        
+        const apiUrl = `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&part=contentDetails&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`;
+        // Log URL with partial key for debugging
+        console.log("API URL (redacted key):", apiUrl.replace(process.env.NEXT_PUBLIC_YOUTUBE_API_KEY || "", "REDACTED"));
+        
+        const durationResponse = await fetch(apiUrl);
+        
+        if (!durationResponse.ok) {
+          const errorText = await durationResponse.text();
+          console.error(`YouTube API error (${durationResponse.status}):`, errorText);
+          throw new Error(`YouTube API error: ${durationResponse.status} - ${errorText}`);
+        }
+        
+        const durationData = await durationResponse.json();
+        console.log("YouTube API duration response:", durationData);
+        
+        if (durationData.items && durationData.items.length > 0 && durationData.items[0].contentDetails) {
+          // Convert ISO 8601 duration to human-readable format
+          const isoDuration = durationData.items[0].contentDetails.duration;
+          console.log("ISO Duration:", isoDuration);
+          
+          const duration = formatDuration(isoDuration);
+          console.log("Formatted duration:", duration);
+          
+          return {
+            thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+            title: data.title,
+            duration
+          };
+        } else {
+          console.warn("YouTube API response missing duration data:", durationData);
+          // Fall through to return with unknown duration
+        }
+      } catch (durationError) {
+        console.error("Error fetching duration:", durationError);
+        // Continue with basic info if duration fetch fails
+      }
+      
+      // Return basic info if duration fetch fails
       return {
         thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
         title: data.title,
-        duration: "Loading..." // oEmbed doesn’t give duration
+        duration: "Unknown" // Fallback if we can't get the duration
       };
     } catch (error) {
       console.error("Error fetching video info:", error);
@@ -89,6 +136,32 @@ export default function InputForm() {
         title: "Video Title Unavailable",
         duration: "Unknown"
       };
+    }
+  };
+
+  // Function to convert ISO 8601 duration to human-readable format
+  const formatDuration = (isoDuration: string): string => {
+    console.log("Formatting duration from:", isoDuration);
+    
+    // YouTube duration format is like PT1H24M12S (1 hour, 24 minutes, 12 seconds)
+    // or PT4M3S (4 minutes, 3 seconds)
+    const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    
+    if (!match) {
+      console.warn("Invalid duration format:", isoDuration);
+      return "Unknown";
+    }
+    
+    const hours = match[1] ? parseInt(match[1]) : 0;
+    const minutes = match[2] ? parseInt(match[2]) : 0;
+    const seconds = match[3] ? parseInt(match[3]) : 0;
+    
+    console.log(`Parsed duration: ${hours}h ${minutes}m ${seconds}s`);
+    
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    } else {
+      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
     }
   };
 
@@ -138,6 +211,12 @@ export default function InputForm() {
   const [file, setFile] = useState<File | undefined>(undefined);
 
   const handleAnalyze = async () => {
+    // Check if NovaSentinel model is selected, which is currently under maintenance
+    if (modelType === "hosted") {
+      toast.error("NovaSentinel model is currently under maintenance. Please try NovaVerse model instead.");
+      return;
+    }
+    
     if (
       (!inputUrl && inputMethod === "videoUrl") ||
       (!file && (inputMethod === "video" || inputMethod === "document"))
@@ -188,6 +267,9 @@ export default function InputForm() {
               const info = await getYoutubeVideoInfo(videoId);
               console.log("Received video info:", info);
 
+              // Debug log the duration specifically
+              console.log("Setting duration to:", info.duration);
+              
               setVideoInfo({
                 thumbnail: info.thumbnail,
                 title: info.title,
@@ -230,7 +312,7 @@ export default function InputForm() {
         // The user is uploading a file
         console.log("Processing file upload for type:", inputMethod);
         // ...
-        // For brevity, you’d do file-based analysis here
+        // For brevity, you'd do file-based analysis here
         toast.success("Mock analysis completed for uploaded file!");
       }
     } catch (error) {
@@ -281,7 +363,7 @@ export default function InputForm() {
   };
 
   return (
-    <div className="w-full max-w-2xl animate-fade-in">
+    <div className="w-full max-w-3xl animate-fade-in">
       <div className="p-6 rounded-xl border border-border/60 bg-card/50 backdrop-blur-sm shadow-sm transition-all duration-200 hover:shadow-md">
         {/* Tabs for input method selection */}
         <div className="flex justify-center mb-5">

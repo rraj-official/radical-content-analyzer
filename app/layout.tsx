@@ -15,8 +15,8 @@ const satoshi = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Frontend Template",
-  description: "A frontend template for web applications",
+  title: "Cachenova - Radical Content Analyzer",
+  description: "Cachenova is a platform that analyzes content for radicalism and religious extremism.",
 };
 
 export default function RootLayout({
