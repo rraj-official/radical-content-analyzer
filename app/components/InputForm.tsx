@@ -363,7 +363,7 @@ export default function InputForm() {
   };
 
   return (
-    <div className="w-full max-w-3xl animate-fade-in">
+    <div className="w-full max-w-4xl animate-fade-in">
       <div className="p-6 rounded-xl border border-border/60 bg-card/50 backdrop-blur-sm shadow-sm transition-all duration-200 hover:shadow-md">
         {/* Tabs for input method selection */}
         <div className="flex justify-center mb-5">
