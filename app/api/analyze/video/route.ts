@@ -79,11 +79,19 @@ async function downloadVideo(url: string): Promise<string> {
     console.log(`[VIDEO DOWNLOAD] Output path: ${baseOutputPath}`);
 
     // Using yt-dlp with additional parameters to bypass restrictions
+    // execSync(
+    //   `source venv/bin/activate && yt-dlp --no-check-certificate --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" -o "${baseOutputPath}" "${url}"`,
+    //   { stdio: 'pipe'}
+    // );
+    // execSync(
+    //   `yt-dlp --cookies /home/ant-pc/test/youtube_cookies.txt --no-check-certificate --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" -o "${baseOutputPath}" "${url}"`,
+    //   { stdio: 'pipe' }
+    // );
     execSync(
-      `yt-dlp --no-check-certificate --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" -o "${baseOutputPath}" "${url}"`,
+      `yt-dlp --cookies /home/ant-pc/test/youtube_cookies.txt -o "${baseOutputPath}" "${url}"`,
       { stdio: 'pipe' }
     );
-
+// yt-dlp --no-check-certificate --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     console.log(`[VIDEO DOWNLOAD] Download command completed successfully`);
 
     // Find the actual downloaded file which might have a different extension
