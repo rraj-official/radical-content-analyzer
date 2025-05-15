@@ -18,7 +18,7 @@ gcloud_credentials.json
 /out/
 /build
 /dist
-
+tmp/
 # Cache
 .npm
 .eslintcache
