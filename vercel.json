@@ -1,12 +1,13 @@
 {
+    "buildCommand": "bash ./vercel-build.sh",
+    "installCommand": "npm install",
     "functions": {
-      "app/api/analyze/video/route.ts": {
-        "memory": 1024,
-        "maxDuration": 60,
-        "environment": {
-          "PATH": ".vercel/bin:${PATH}"
+        "app/api/analyze/video/route.ts": {
+            "memory": 1024,
+            "maxDuration": 60
         }
-      }
+    },
+    "env": {
+        "PATH": ".vercel/bin:${PATH}"
     }
-  }
-  
+}
