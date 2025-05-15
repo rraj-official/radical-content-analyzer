@@ -654,25 +654,23 @@ function cleanupFiles(filePaths: string[]): void {
 }
 
 export async function POST(request: Request) {
-  try {
-    console.log(`[API] Received video analysis request`);
-    const { url } = await request.json();
+  console.log(`[API] Received video analysis request`);
 
-    if (!url) {
-      console.error(`[API] ERROR: Missing URL parameter`);
-      return NextResponse.json({ error: 'Video URL is required' }, { status: 400 });
-    }
-
-    console.log(`[API] Processing video URL: ${url}`);
-
-    // Process video URL
-    const result = await processVideoUrl(url);
-
-    console.log(`[API] SUCCESS: Video analysis completed, returning results`);
-    console.log(`[API] Returning results:`, result);
-    return NextResponse.json(result);
-  } catch (error: any) {
-    console.error(`[API] ERROR: Failed to process video analysis request: ${error}`);
-    return NextResponse.json({ error: error.message || 'Failed to process video' }, { status: 500 });
+  const { url } = await request.json();
+  if (!url) {
+    console.error(`[API] ERROR: Missing URL parameter`);
+    return NextResponse.json(
+      { error: 'Video URL is required' },
+      { status: 400 }
+    );
   }
+
+  console.log(`[API] Processing video URL: ${url}`);
+
+  // Let any errors bubble up so that Vercel logs the stack trace
+  const result = await processVideoUrl(url);
+
+  console.log(`[API] SUCCESS: Video analysis completed, returning results`);
+  return NextResponse.json(result);
 }
+
