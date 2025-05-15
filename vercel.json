@@ -3,8 +3,8 @@
     "installCommand": "npm install",
     "functions": {
         "app/api/analyze/video/route.ts": {
-            "memory": 3072,
-            "maxDuration": 300
+            "memory": 1024,
+            "maxDuration": 60
         }
     }
 }
