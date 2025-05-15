@@ -6,18 +6,5 @@
       "memory": 1024,
       "maxDuration": 60
     }
-  },
-  "builds": [
-    {
-      "src": "vercel-build.sh",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "."
-      }
-    },
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ]
-} 
+  }
+}
