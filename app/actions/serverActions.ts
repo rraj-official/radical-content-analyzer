@@ -174,31 +174,46 @@ export async function processWebsite(url: string, options?: any) {
 }
 
 export async function analyzeVideoUrl(url: string) {
-  // Call the video analysis API
   try {
-    // Use absolute URL format with origin for server-side fetch
-    const origin = typeof window === 'undefined' 
-      ? (process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL || 'http://localhost:3000') 
-      : window.location.origin;
-    const response = await fetch(`${origin}/api/analyze/video`, {
+    // 1. Determine origin
+    const origin =
+      typeof window === 'undefined'
+        ? // server-side:
+          (
+            // allow explicit override in env (e.g. "https://my.custom.domain")
+            process.env.NEXT_PUBLIC_SITE_URL
+              ?.replace(/\/+$/, '') 
+            // else use VERCEL_URL (just the domain), so prefix https://
+            ?? (process.env.VERCEL_URL
+              ? `https://${process.env.VERCEL_URL}`
+              : undefined)
+          )
+          // final fallback to localhost
+          || 'http://localhost:3000'
+        : // client-side
+          window.location.origin;
+
+    // 2. Safely build the full endpoint
+    const endpoint = new URL('/api/analyze/video', origin).toString();
+
+    // 3. Call the API
+    const response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.error || 'Failed to analyze video');
     }
 
-    const result = await response.json();
-    return result;
+    return await response.json();
   } catch (error) {
     console.error('Error analyzing video:', error);
     throw error;
   }
 }
+
 
 // Add any other server actions needed by the application 
