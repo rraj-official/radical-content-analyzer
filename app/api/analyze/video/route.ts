@@ -7,6 +7,10 @@ import { SpeechClient } from '@google-cloud/speech';
 import { Storage } from '@google-cloud/storage';
 import OpenAI from 'openai';
 import { VideoAnalysisResult } from '@/lib/interfaces';
+// force this API route to run as a Node.js function
+export const runtime = 'nodejs';
+// force dynamic behavior so it’s not treated as a static edge function
+export const dynamic = 'force-dynamic';
 
 // Set up the custom bin directory in PATH for Vercel
 if (process.env.VERCEL === '1') {
