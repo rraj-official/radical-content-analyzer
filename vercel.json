@@ -1,0 +1,23 @@
+{
+  "buildCommand": "bash ./vercel-build.sh",
+  "installCommand": "npm install",
+  "functions": {
+    "app/api/analyze/video/route.ts": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  },
+  "builds": [
+    {
+      "src": "vercel-build.sh",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "."
+      }
+    },
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ]
+} 

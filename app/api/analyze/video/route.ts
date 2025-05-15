@@ -8,6 +8,18 @@ import { Storage } from '@google-cloud/storage';
 import OpenAI from 'openai';
 import { VideoAnalysisResult } from '@/lib/interfaces';
 
+// Set up the custom bin directory in PATH for Vercel
+if (process.env.VERCEL === '1') {
+  try {
+    // Use the .vercel/bin directory where our custom binaries are installed
+    const binDir = path.join(process.cwd(), '.vercel/bin');
+    process.env.PATH = `${binDir}:${process.env.PATH}`;
+    console.log(`[SETUP] Added custom bin directory to PATH: ${binDir}`);
+  } catch (error) {
+    console.error('[SETUP] Error setting up PATH:', error);
+  }
+}
+
 // -----------------------------
 // NEW HELPER FUNCTIONS
 // -----------------------------
@@ -68,113 +80,21 @@ const chunksDir = path.join(tmpDir, 'chunks');
   }
 });
 
-// Add utility function to check if a command exists
-function commandExists(command: string): boolean {
-  try {
-    execSync(`which ${command}`, { stdio: 'ignore' });
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-// Add function to install dependencies
-async function installDependencies(): Promise<boolean> {
-  console.log('[SETUP] Checking and installing dependencies...');
-  
-  try {
-    // Create a temporary directory for binaries
-    const binDir = path.join(process.cwd(), 'bin');
-    if (!fs.existsSync(binDir)) {
-      fs.mkdirSync(binDir, { recursive: true });
-    }
-    
-    // Add binDir to PATH
-    process.env.PATH = `${binDir}:${process.env.PATH}`;
-    
-    // Check for yt-dlp
-    if (!commandExists('yt-dlp')) {
-      console.log('[SETUP] Installing yt-dlp...');
-      
-      // Download yt-dlp binary
-      execSync(
-        `curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ${binDir}/yt-dlp`,
-        { stdio: 'inherit' }
-      );
-      
-      // Make executable
-      execSync(`chmod +x ${binDir}/yt-dlp`, { stdio: 'inherit' });
-      
-      console.log('[SETUP] yt-dlp installed successfully');
-    } else {
-      console.log('[SETUP] yt-dlp already installed');
-    }
-    
-    // Check for ffmpeg
-    if (!commandExists('ffmpeg')) {
-      console.log('[SETUP] Installing ffmpeg...');
-      
-      // For Linux x64 (most Vercel functions)
-      execSync(
-        `curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ${binDir}/ffmpeg.tar.xz`,
-        { stdio: 'inherit' }
-      );
-      
-      // Extract
-      execSync(`tar -xf ${binDir}/ffmpeg.tar.xz -C ${binDir}`, { stdio: 'inherit' });
-      
-      // Find the extracted directory
-      const ffmpegDirs = fs.readdirSync(binDir).filter(dir => dir.startsWith('ffmpeg-'));
-      
-      if (ffmpegDirs.length) {
-        // Copy binaries
-        execSync(`cp ${binDir}/${ffmpegDirs[0]}/ffmpeg ${binDir}/ffmpeg`, { stdio: 'inherit' });
-        execSync(`cp ${binDir}/${ffmpegDirs[0]}/ffprobe ${binDir}/ffprobe`, { stdio: 'inherit' });
-        
-        // Make executable
-        execSync(`chmod +x ${binDir}/ffmpeg ${binDir}/ffprobe`, { stdio: 'inherit' });
-        
-        console.log('[SETUP] ffmpeg installed successfully');
-      } else {
-        throw new Error('Could not extract ffmpeg');
-      }
-    } else {
-      console.log('[SETUP] ffmpeg already installed');
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('[SETUP] Error installing dependencies:', error);
-    return false;
-  }
-}
-
 // Helper function to download video from URL
 async function downloadVideo(url: string): Promise<string> {
   const videoId = uuidv4();
   const baseOutputPath = path.join(downloadsDir, videoId);
-  const expectedOutputPath = `${baseOutputPath}.mp4`;
 
   try {
     console.log(`[VIDEO DOWNLOAD] Starting download from URL: ${url}`);
     console.log(`[VIDEO DOWNLOAD] Output path: ${baseOutputPath}`);
+    console.log(`[VIDEO DOWNLOAD] Current PATH: ${process.env.PATH}`);
 
-    // Check if we're in Vercel environment
-    const isVercel = process.env.VERCEL === '1';
-    
-    // Use a simpler command without cookies for Vercel
-    if (isVercel) {
-      execSync(
-        `yt-dlp --no-check-certificate --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" -o "${baseOutputPath}" "${url}"`,
-        { stdio: 'pipe' }
-      );
-    } else {
-      // Original command for non-Vercel environments
-      execSync(
-        `yt-dlp --cookies /home/ant-pc/test/youtube_cookies.txt -o "${baseOutputPath}" "${url}"`,
-        { stdio: 'pipe' }
-      );
-    }
+    // Use a simpler command for all environments
+    execSync(
+      `yt-dlp --no-check-certificate --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" -o "${baseOutputPath}" "${url}"`,
+      { stdio: 'pipe' }
+    );
 
     console.log(`[VIDEO DOWNLOAD] Download command completed successfully`);
 
@@ -729,7 +649,6 @@ function cleanupFiles(filePaths: string[]): void {
   console.log(`[CLEANUP] Cleanup completed`);
 }
 
-// Modify the POST handler to attempt installing dependencies if needed
 export async function POST(request: Request) {
   try {
     console.log(`[API] Received video analysis request`);
@@ -742,120 +661,14 @@ export async function POST(request: Request) {
 
     console.log(`[API] Processing video URL: ${url}`);
 
-    // Check if we're in Vercel production environment
-    const isVercelProduction = process.env.VERCEL === '1';
-    
-    if (isVercelProduction) {
-      console.log(`[API] Running in Vercel production environment - attempting to install dependencies`);
-      
-      // Try to install dependencies
-      const installSuccess = await installDependencies();
-      
-      if (!installSuccess) {
-        console.log(`[API] Failed to install dependencies - using mock data`);
-        
-        // Return mock data since we couldn't install dependencies
-        const analysisId = `video-analysis-${uuidv4()}`;
-        
-        return NextResponse.json({
-          type: "video",
-          analysisId: analysisId,
-          url: url,
-          lastAnalyzedAt: new Date().toISOString(),
-          feedbackGiven: false,
-          success: true,
-          message: "Video analysis completed with mock data (Vercel deployment)",
-          inputParameters: {
-            videoTitle: url.split('/').pop() || 'YouTube Video',
-            videoDuration: 180,
-            transcription: {
-              english: "This is mock transcript data for Vercel deployment. Dependencies installation failed.",
-              hindi: "यह Vercel परिनियोजन के लिए नकली प्रतिलेखन डेटा है। निर्भरताओं की स्थापना विफल हो गई।"
-            }
-          },
-          outputParameters: {
-            radicalProbability: 35,
-            radicalContent: 25,
-            overallScore: {
-              score: 60,
-              label: "Moderate Concern",
-              color: "amber"
-            },
-            lexicalAnalysis: "Mock analysis generated for Vercel deployment - actual processing requires server with yt-dlp and ffmpeg.",
-            emotionAnalysis: "Mock analysis generated for Vercel deployment. Could not install dependencies.",
-            speechPatterns: "Mock analysis generated for Vercel deployment.",
-            religiousRhetoric: "Mock analysis generated for Vercel deployment.",
-            commandsDirectives: "Mock analysis generated for Vercel deployment.",
-            overallAssessment: "This is mock data for Vercel deployment. The installation of yt-dlp and ffmpeg in the serverless environment failed. Consider using a custom server for full functionality.",
-            riskFactors: [
-              "Mock risk factor 1",
-              "Mock risk factor 2",
-              "Vercel deployment failed to install dependencies"
-            ],
-            safetyTips: [
-              "Consider deploying to a custom server for full functionality",
-              "This is mock data and not an actual analysis",
-              "Verify content through other means"
-            ]
-          }
-        });
-      }
-      
-      console.log(`[API] Successfully installed dependencies - proceeding with analysis`);
-    }
-
     // Process video URL
     const result = await processVideoUrl(url);
 
     console.log(`[API] SUCCESS: Video analysis completed, returning results`);
+    console.log(`[API] Returning results:`, result);
     return NextResponse.json(result);
   } catch (error: any) {
     console.error(`[API] ERROR: Failed to process video analysis request: ${error}`);
-    
-    // Provide a more helpful error message for Vercel deployments
-    if (process.env.VERCEL === '1') {
-      const analysisId = `error-${uuidv4()}`;
-      
-      return NextResponse.json({
-        type: "video",
-        analysisId: analysisId,
-        url: "error",
-        lastAnalyzedAt: new Date().toISOString(),
-        feedbackGiven: false,
-        success: false,
-        message: "Video analysis failed in Vercel environment",
-        inputParameters: {
-          videoTitle: "Error Processing Video",
-          videoDuration: 0,
-          transcription: {
-            english: "An error occurred during processing. The error was: " + error.message,
-            hindi: "प्रसंस्करण के दौरान एक त्रुटि हुई। त्रुटि थी: " + error.message
-          }
-        },
-        outputParameters: {
-          radicalProbability: 0,
-          radicalContent: 0,
-          overallScore: {
-            score: 0,
-            label: "Error",
-            color: "gray"
-          },
-          lexicalAnalysis: "Error during processing: " + error.message,
-          emotionAnalysis: "Error during processing",
-          speechPatterns: "Error during processing",
-          religiousRhetoric: "Error during processing",
-          commandsDirectives: "Error during processing",
-          overallAssessment: "Error: " + error.message + ". Consider deploying to a custom server for full functionality.",
-          riskFactors: ["Error during processing: " + error.message],
-          safetyTips: [
-            "Deploy to a custom server for full functionality",
-            "Vercel serverless functions may have limitations for this task",
-            "Consider using a dedicated server with the necessary tools installed"
-          ]
-        }
-      });
-    }
-    
     return NextResponse.json({ error: error.message || 'Failed to process video' }, { status: 500 });
   }
 }
