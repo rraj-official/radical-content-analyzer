@@ -177,7 +177,9 @@ export async function analyzeVideoUrl(url: string) {
   // Call the video analysis API
   try {
     // Use absolute URL format with origin for server-side fetch
-    const origin = typeof window === 'undefined' ? process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000' : window.location.origin;
+    const origin = typeof window === 'undefined' 
+      ? (process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL || 'http://localhost:3000') 
+      : window.location.origin;
     const response = await fetch(`${origin}/api/analyze/video`, {
       method: 'POST',
       headers: {
