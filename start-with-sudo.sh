@@ -28,6 +28,9 @@ sudo -u ant-pc pm2 delete all 2>/dev/null
 sudo pm2 stop all 2>/dev/null
 sudo pm2 delete all 2>/dev/null
 
+# Activate the virtual environment
+source venv/bin/activate
+
 # Start the application with PM2 as root
 echo "Starting CacheNova application with PM2 as root..."
 sudo pm2 start ecosystem.config.js
@@ -36,7 +39,7 @@ echo "=====================================================================
 Setup complete! 🎉
 
 Your Next.js application is now running:
-- http://cachenova.in:3000 - The application is running in HTTP mode
+- http://cachenova.in:4000 - The application is running in HTTP mode
 
 To stop the application:
 - sudo pm2 stop all

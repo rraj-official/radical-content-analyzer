@@ -79,10 +79,11 @@ async function downloadVideo(url: string): Promise<string> {
     console.log(`[VIDEO DOWNLOAD] Output path: ${baseOutputPath}`);
 
     // Using yt-dlp with additional parameters to bypass restrictions
-    execSync(
-      `yt-dlp --no-check-certificate --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" -o "${baseOutputPath}" "${url}"`,
-      { stdio: 'pipe' }
-    );
+    // ... existing code ...
+  execSync(
+    `/home/ant-pc/Documents/radical-content-analyzer/venv/bin/yt-dlp --no-check-certificate --cookies "../../../cookies.txt" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" -o "${baseOutputPath}" "${url}"`,
+    { stdio: 'pipe' }
+      );
 
     console.log(`[VIDEO DOWNLOAD] Download command completed successfully`);
 
