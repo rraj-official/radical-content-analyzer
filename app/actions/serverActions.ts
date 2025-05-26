@@ -24,12 +24,12 @@ export async function saveAnalysisData(analysisData: any) {
 
 export async function getAnalysisById(id: string) {
   console.log('Fetching analysis for ID:', id);
-  
+
   // Check if it's a mock ID for development/testing
   if (id.startsWith('mock-')) {
-    const type = id.includes('video') ? 'video' : 
-                id.includes('apk') ? 'apk' : 'website';
-                
+    const type = id.includes('video') ? 'video' :
+      id.includes('apk') ? 'apk' : 'website';
+
     // Import and return appropriate mock data based on the ID type
     if (type === 'video') {
       const { getMockVideoAnalysis } = require('@/lib/interfaces');
@@ -42,11 +42,11 @@ export async function getAnalysisById(id: string) {
       return getMockWebsiteAnalysis();
     }
   }
-  
+
   // For real analysis IDs, you would query your database here
   // This is a temporary implementation that creates realistic-looking data
   // In production, replace this with actual database queries
-  
+
   try {
     // Generate dummy data based on the analysis ID
     // In a real implementation, you would fetch this from your database
@@ -91,13 +91,13 @@ export async function getAnalysisById(id: string) {
 
 export async function fetchAnalysis(id: string) {
   console.log("Fetching analysis for ID:", id);
-  
+
   // Check if it's from a video API call
   if (id.startsWith('video-analysis-') || id.startsWith('error-')) {
     console.log("Processing API-generated analysis ID:", id);
     // This is a real analysis ID from the API
     // In a real app, you would fetch this from a database
-    
+
     // For now, we'll create a realistic-looking result
     return {
       type: "video",
@@ -110,8 +110,8 @@ export async function fetchAnalysis(id: string) {
         videoDuration: 120,
         videoTitle: id.startsWith('error-') ? "Error Processing Video" : "API-Generated Analysis",
         transcription: {
-          english: id.startsWith('error-') 
-            ? "An error occurred during processing" 
+          english: id.startsWith('error-')
+            ? "An error occurred during processing"
             : "This analysis was generated from a real API call with mock data.",
           hindi: "यह विश्लेषण मॉक डेटा के साथ एक वास्तविक API कॉल से उत्पन्न किया गया था।"
         }
@@ -137,7 +137,7 @@ export async function fetchAnalysis(id: string) {
       }
     };
   }
-  
+
   // If it's not from API, call the regular method
   return getAnalysisById(id);
 }
@@ -145,29 +145,29 @@ export async function fetchAnalysis(id: string) {
 export async function analyzeUrlsFromCSV(csvData: string) {
   // Implement CSV analysis functionality
   console.log('Analyzing URLs from CSV data length:', csvData.length);
-  
+
   // Extract URLs from CSV data (simplified implementation)
   const urls = csvData.split(',').map(url => url.trim()).filter(url => url.length > 0);
-  
-  return { 
-    success: true, 
-    urls, 
+
+  return {
+    success: true,
+    urls,
     totalUrls: urls.length,
-    results: [] 
+    results: []
   };
 }
 
 export async function processWebsite(url: string, options?: any) {
   // Implement website processing functionality
   console.log('Processing website:', url, options);
-  return { 
-    success: true, 
+  return {
+    success: true,
     url,
     timestamp: new Date().toISOString(),
     analysisResults: {},
     screenshot_url: 'https://example.com/screenshot.jpg',
     sts_url: 'https://example.com/sts',
-    output_json: {}, 
+    output_json: {},
     overall_score: 0.5,
     status: 'completed'
   };
@@ -177,7 +177,12 @@ export async function analyzeVideoUrl(url: string) {
   // Call the video analysis API
   try {
     // Use absolute URL format with origin for server-side fetch
-    const origin = typeof window === 'undefined' ? process.env.VERCEL_URL || 'http://localhost:3000' : window.location.origin;
+    const origin =
+      typeof window === 'undefined'
+        ? process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : 'http://localhost:3000'
+        : window.location.origin;
     const response = await fetch(`${origin}/api/analyze/video`, {
       method: 'POST',
       headers: {
