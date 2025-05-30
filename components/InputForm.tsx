@@ -302,14 +302,10 @@ async function getYoutubeVideoInfo(videoId: string) {
         isValidFile = file.type.startsWith("video/");
         errorMessage = "Invalid file type. Please upload a video file.";
       } else if (inputMethod === "document") {
-        const validTypes = [
-          "text/plain",
-          "application/msword",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ];
+        // Only accept .txt files for now since our API only supports plain text
+        const validTypes = ["text/plain"];
         isValidFile = validTypes.includes(file.type);
-        errorMessage =
-          "Invalid file type. Please upload a .txt, .doc, or .docx file.";
+        errorMessage = "Invalid file type. Please upload a .txt file only.";
       }
       if (!isValidFile) {
         toast.error(errorMessage);
@@ -325,14 +321,118 @@ async function getYoutubeVideoInfo(videoId: string) {
       toast.error(`Please select a ${fileType} file to analyze`);
       return null;
     }
+    
     try {
-      toast.success(
-        `${inputMethod.charAt(0).toUpperCase() + inputMethod.slice(1)} analysis completed successfully!`
-      );
-      return { analysisId: "mock-" + Date.now() };
+      if (inputMethod === "video") {
+        console.log("🎬 Starting video file analysis for:", file.name);
+
+        // Set video info for file
+        setVideoInfo({
+          thumbnail: "",
+          title: file.name.replace(/\.[^/.]+$/, ""), // Remove file extension
+          duration: "Unknown",
+          isLoading: false,
+          isAnalyzing: true,
+        });
+
+        // Display a notification
+        toast.info("Starting video file analysis process. This may take several minutes...");
+
+        // Create FormData and append the file
+        const formData = new FormData();
+        formData.append('video', file);
+
+        // Call the video file analysis API directly
+        console.log("📡 Calling video file analysis API...");
+        const response = await fetch('/api/analyze/video-file', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to analyze video file');
+        }
+
+        const responseData = await response.json();
+        console.log("📡 API response data:", responseData);
+
+        // Check if we have a valid analysis result
+        if (!responseData || (!responseData.analysisId && !responseData.success)) {
+          console.error("❌ No valid response:", responseData);
+          throw new Error("Invalid response from video file analysis API");
+        }
+
+        console.log("✅ Analysis complete:", responseData);
+
+        // Show success message
+        toast.success("Video file analysis completed successfully!");
+
+        // IMPORTANT: Set isAnalyzing to false using functional form,
+        // and store the full response in our `analysisData` state
+        setVideoInfo(prev => (prev ? { ...prev, isAnalyzing: false } : null));
+        setAnalysisData(responseData);
+
+        return responseData;
+      } else if (inputMethod === "document") {
+        console.log("📄 Starting text file analysis for:", file.name);
+
+        // Set video info for text file (reusing the same structure)
+        setVideoInfo({
+          thumbnail: "",
+          title: file.name.replace(/\.[^/.]+$/, ""), // Remove file extension
+          duration: `${(file.size / 1024).toFixed(1)} KB`,
+          isLoading: false,
+          isAnalyzing: true,
+        });
+
+        // Display a notification
+        toast.info("Starting text file analysis process. This may take a few moments...");
+
+        // Create FormData and append the file
+        const formData = new FormData();
+        formData.append('textFile', file);
+
+        // Call the text file analysis API directly
+        console.log("📡 Calling text file analysis API...");
+        const response = await fetch('/api/analyze/text-file', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to analyze text file');
+        }
+
+        const responseData = await response.json();
+        console.log("📡 API response data:", responseData);
+
+        // Check if we have a valid analysis result
+        if (!responseData || (!responseData.analysisId && !responseData.success)) {
+          console.error("❌ No valid response:", responseData);
+          throw new Error("Invalid response from text file analysis API");
+        }
+
+        console.log("✅ Analysis complete:", responseData);
+
+        // Show success message
+        toast.success("Text file analysis completed successfully!");
+
+        // IMPORTANT: Set isAnalyzing to false using functional form,
+        // and store the full response in our `analysisData` state
+        setVideoInfo(prev => (prev ? { ...prev, isAnalyzing: false } : null));
+        setAnalysisData(responseData);
+
+        return responseData;
+      }
     } catch (error) {
       console.error(`Error analyzing ${inputMethod} file:`, error);
-      toast.error(`Failed to analyze ${inputMethod} file. Please try again.`);
+      toast.error(
+        error instanceof Error ? error.message : `Failed to analyze ${inputMethod} file. Please try again.`
+      );
+      // If something breaks, also set isAnalyzing to false for both file types
+      setVideoInfo(prev => (prev ? { ...prev, isAnalyzing: false } : null));
       return null;
     }
   };
@@ -481,8 +581,8 @@ async function getYoutubeVideoInfo(videoId: string) {
                 )}
               </div>
 
-              {/* YouTube Video Analysis UI */}
-              {videoInfo && (
+              {/* YouTube Video Analysis UI - Only for video URLs */}
+              {videoInfo && inputMethod === "videoUrl" && (
                 <div className="mt-4 border rounded-lg p-4 bg-accent/30 animate-slide-up">
                   {videoInfo.isLoading ? (
                     <div className="flex flex-col items-center justify-center py-6 space-y-4">
@@ -774,7 +874,7 @@ async function getYoutubeVideoInfo(videoId: string) {
                             Drag & drop or click to upload video
                           </p>
                           <p className="text-xs text-muted-foreground mt-1">
-                            Analyze video content for potential threats
+                            Analyze video content for potential radical content
                           </p>
                         </>
                       )}
@@ -791,13 +891,9 @@ async function getYoutubeVideoInfo(videoId: string) {
                 ) : (
                   <div>
                     <div className="flex gap-3 items-center p-3 border rounded-lg bg-accent/30 transition-all duration-150 hover:bg-accent/50">
-                      <Image
-                        src="/images/apk-file.png"
-                        alt="Video File"
-                        width={40}
-                        height={40}
-                        className="rounded"
-                      />
+                      <div className="w-10 h-10 bg-primary/10 rounded flex items-center justify-center">
+                        <FileIcon size={20} className="text-primary" />
+                      </div>
                       <div className="flex-1">
                         <p className="font-medium truncate text-sm">{file.name}</p>
                         <p className="text-xs text-muted-foreground">
@@ -892,14 +988,14 @@ async function getYoutubeVideoInfo(videoId: string) {
                             Drag & drop or click to upload document
                           </p>
                           <p className="text-xs text-muted-foreground mt-1">
-                            Analyze .txt, .doc, or .docx files for potential threats
+                            Analyze .txt files for potential radical content
                           </p>
                         </>
                       )}
                     </div>
                     <input
                       type="file"
-                      accept=".txt,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                      accept=".txt,text/plain"
                       ref={fileInputRef}
                       onChange={handleFileChange}
                       disabled={isLoading}
@@ -909,13 +1005,9 @@ async function getYoutubeVideoInfo(videoId: string) {
                 ) : (
                   <div>
                     <div className="flex gap-3 items-center p-3 border rounded-lg bg-accent/30 transition-all duration-150 hover:bg-accent/50">
-                      <Image
-                        src="/images/apk-file.png"
-                        alt="Document File"
-                        width={40}
-                        height={40}
-                        className="rounded"
-                      />
+                      <div className="w-10 h-10 bg-primary/10 rounded flex items-center justify-center">
+                        <FileTextIcon size={20} className="text-primary" />
+                      </div>
                       <div className="flex-1">
                         <p className="font-medium truncate text-sm">{file.name}</p>
                         <p className="text-xs text-muted-foreground">
@@ -955,6 +1047,220 @@ async function getYoutubeVideoInfo(videoId: string) {
           </div>
         </div>
       </div>
+
+      {/* File Analysis Display (Video and Text Files) - Only for uploaded files */}
+      {videoInfo && (inputMethod === "video" || inputMethod === "document") && (
+        <div className="mt-6 p-6 rounded-xl border border-border/60 bg-card/50 backdrop-blur-sm shadow-sm animate-slide-up">
+          {videoInfo.isAnalyzing ? (
+            <div className="flex flex-col items-center justify-center py-8 space-y-4">
+              <Loader2Icon size={32} className="animate-spin text-primary" />
+              <div className="text-center">
+                <p className="font-medium">
+                  {inputMethod === "video" ? "Analyzing video file..." : "Analyzing text file..."}
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {inputMethod === "video" 
+                    ? "This may take several minutes" 
+                    : "This may take a few moments"
+                  }
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  {inputMethod === "video" ? (
+                    <FileIcon size={24} className="text-primary" />
+                  ) : (
+                    <FileTextIcon size={24} className="text-primary" />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-lg">{videoInfo.title}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {inputMethod === "video" 
+                      ? `Duration: ${videoInfo.duration} | File uploaded for analysis`
+                      : `Size: ${videoInfo.duration} | Text file uploaded for analysis`
+                    }
+                  </p>
+                </div>
+                <div className="text-green-600 font-medium text-sm">
+                  Analysis Complete ✓
+                </div>
+              </div>
+              
+              {/* Show text content preview for text files */}
+              {inputMethod === "document" && analysisData?.inputParameters?.textContent && (
+                <div className="mt-4 p-4 bg-accent/20 rounded-lg border">
+                  <h4 className="font-medium text-sm mb-2">Text Content Preview</h4>
+                  <div className="text-xs text-muted-foreground mb-2">
+                    Showing first 1000 characters of {analysisData.inputParameters.fullTextLength || 0} total characters
+                  </div>
+                  <div className="text-sm bg-background/50 p-3 rounded border max-h-32 overflow-y-auto">
+                    <pre className="whitespace-pre-wrap font-mono text-xs">
+                      {analysisData.inputParameters.textContent}
+                    </pre>
+                  </div>
+                </div>
+              )}
+
+              {/* Analysis Results for uploaded files */}
+              {analysisData && (
+                <div className="mt-6 pt-6 border-t">
+                  <h3 className="text-lg font-semibold mb-4">Content Analysis Results</h3>
+
+                  {/* Real Analysis Data */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div className="p-4 bg-accent/50 rounded-lg">
+                      <div className="flex justify-between items-center mb-1">
+                        <p className="font-medium">Radical Probability</p>
+                        <p
+                          className={`font-bold ${
+                            analysisData.outputParameters.radicalProbability > 50
+                              ? "text-destructive"
+                              : "text-green-600"
+                          }`}
+                        >
+                          {analysisData.outputParameters.radicalProbability}%
+                        </p>
+                      </div>
+                      <div className="w-full bg-accent/30 rounded-full h-2 mt-2">
+                        <div
+                          className={`h-2 rounded-full transition-all duration-300 ${
+                            analysisData.outputParameters.radicalProbability > 50
+                              ? "bg-destructive"
+                              : "bg-green-600"
+                          }`}
+                          style={{
+                            width: `${analysisData.outputParameters.radicalProbability}%`,
+                          }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-accent/50 rounded-lg">
+                      <div className="flex justify-between items-center mb-1">
+                        <p className="font-medium">Radical Content</p>
+                        <p
+                          className={`font-bold ${
+                            analysisData.outputParameters.radicalContent > 50
+                              ? "text-destructive"
+                              : "text-green-600"
+                          }`}
+                        >
+                          {analysisData.outputParameters.radicalContent}%
+                        </p>
+                      </div>
+                      <div className="w-full bg-accent/30 rounded-full h-2 mt-2">
+                        <div
+                          className={`h-2 rounded-full transition-all duration-300 ${
+                            analysisData.outputParameters.radicalContent > 50
+                              ? "bg-destructive"
+                              : "bg-green-600"
+                          }`}
+                          style={{
+                            width: `${analysisData.outputParameters.radicalContent}%`,
+                          }}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Overall Assessment */}
+                  <div className="mb-6 p-4 bg-accent/30 rounded-lg">
+                    <h4 className="font-medium text-sm mb-2">Overall Assessment</h4>
+                    <p className="text-sm text-muted-foreground">
+                      {analysisData.outputParameters.overallAssessment}
+                    </p>
+                  </div>
+
+                  {/* Analysis Details */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Risk Factors */}
+                    <div>
+                      <h4 className="font-medium text-sm mb-3">Key Risk Factors</h4>
+                      <div className="space-y-2">
+                        {analysisData.outputParameters.riskFactors?.map((factor: string, index: number) => (
+                          <div key={index} className="flex items-start gap-2">
+                            <div className="w-2 h-2 bg-destructive rounded-full mt-1.5 flex-shrink-0"></div>
+                            <p className="text-sm text-muted-foreground">{factor}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Safety Tips */}
+                    <div>
+                      <h4 className="font-medium text-sm mb-3">Safety Tips</h4>
+                      <div className="space-y-2">
+                        {analysisData.outputParameters.safetyTips?.map((tip: string, index: number) => (
+                          <div key={index} className="flex items-start gap-2">
+                            <div className="w-2 h-2 bg-green-600 rounded-full mt-1.5 flex-shrink-0"></div>
+                            <p className="text-sm text-muted-foreground">{tip}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Detailed Analysis Sections */}
+                  <div className="mt-6 space-y-4">
+                    <div className="p-4 border rounded-lg bg-accent/20">
+                      <h4 className="font-medium text-sm mb-2">Lexical Analysis</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {analysisData.outputParameters.lexicalAnalysis}
+                      </p>
+                    </div>
+
+                    <div className="p-4 border rounded-lg bg-accent/20">
+                      <h4 className="font-medium text-sm mb-2">Emotion & Sentiment Analysis</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {analysisData.outputParameters.emotionAnalysis}
+                      </p>
+                    </div>
+
+                    <div className="p-4 border rounded-lg bg-accent/20">
+                      <h4 className="font-medium text-sm mb-2">Speech Patterns & Intensity</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {analysisData.outputParameters.speechPatterns}
+                      </p>
+                    </div>
+
+                    <div className="p-4 border rounded-lg bg-accent/20">
+                      <h4 className="font-medium text-sm mb-2">Religious Rhetoric</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {analysisData.outputParameters.religiousRhetoric}
+                      </p>
+                    </div>
+
+                    <div className="p-4 border rounded-lg bg-accent/20">
+                      <h4 className="font-medium text-sm mb-2">Commands & Directives</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {analysisData.outputParameters.commandsDirectives}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="mt-6 flex gap-4 justify-center">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setAnalysisData(null);
+                        setVideoInfo(null);
+                        setFile(undefined);
+                      }}
+                    >
+                      Analyze Another Content
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

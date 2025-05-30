@@ -203,4 +203,31 @@ export async function analyzeVideoUrl(url: string) {
   }
 }
 
+export async function analyzeVideoFile(formData: FormData) {
+  // Call the video file analysis API
+  try {
+    // Use absolute URL format with origin for server-side fetch
+    const origin =
+      process.env.NODE_ENV === 'production' && process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : 'http://localhost:3000';
+    console.log('Origin:', origin);
+    const response = await fetch(`${origin}/api/analyze/video-file`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to analyze video file');
+    }
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error('Error analyzing video file:', error);
+    throw error;
+  }
+}
+
 // Add any other server actions needed by the application 
