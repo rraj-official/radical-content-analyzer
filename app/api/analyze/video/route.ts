@@ -71,67 +71,106 @@ const chunksDir = path.join(tmpDir, 'chunks');
 // Helper function to download video from URL
 async function downloadVideo(url: string): Promise<string> {
   const videoId = uuidv4();
-  const baseOutputPath = path.join(downloadsDir, videoId);
-  const expectedOutputPath = `${baseOutputPath}.mp4`;
+  const outputPath = path.join(downloadsDir, `${videoId}.mp4`);
 
   try {
-    console.log(`[VIDEO DOWNLOAD] Starting download from URL: ${url}`);
-    console.log(`[VIDEO DOWNLOAD] Output path: ${baseOutputPath}`);
+    console.log(`[VIDEO DOWNLOAD] Starting download from URL using Sieve API: ${url}`);
+    
+    // Step 1: Push the download job to Sieve API
+    const pushResponse = await fetch('https://mango.sievedata.com/v2/push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': process.env.SIEVE_API_KEY || ''
+      },
+      body: JSON.stringify({
+        function: 'sieve/youtube-downloader',
+        inputs: {
+          url: url,
+          download_type: 'video',
+          resolution: '360p',
+          include_audio: true,
+          start_time: 0,
+          end_time: -1,
+          include_metadata: false,
+          metadata_fields: [],
+          include_subtitles: false,
+          subtitle_languages: [],
+          video_format: 'mp4',
+          audio_format: 'mp3',
+          subtitle_format: 'vtt'
+        }
+      })
+    });
 
-    // Using yt-dlp with additional parameters to bypass restrictions
-    // ... existing code ...
-  execSync(
-    process.platform === 'win32'
-      ? `.\\venv\\Scripts\\yt-dlp.exe --no-check-certificate --cookies "../../../cookies.txt" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" -o "${baseOutputPath}" "${url}"`
-      : `${process.cwd()}/venv/bin/yt-dlp --no-check-certificate --cookies "../../../cookies.txt" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" -o "${baseOutputPath}" "${url}"`,
-    { stdio: 'pipe' }
-  );
-
-    console.log(`[VIDEO DOWNLOAD] Download command completed successfully`);
-
-    // Find the actual downloaded file which might have a different extension
-    const files = fs.readdirSync(downloadsDir);
-    const downloadedFile = files.find(file => file.startsWith(videoId));
-
-    if (!downloadedFile) {
-      console.error(`[VIDEO DOWNLOAD] ERROR: Downloaded file not found with ID: ${videoId}`);
-      throw new Error(`Downloaded file not found with ID: ${videoId}`);
+    if (!pushResponse.ok) {
+      throw new Error(`Failed to push job: ${pushResponse.status} - ${await pushResponse.text()}`);
     }
 
-    const actualPath = path.join(downloadsDir, downloadedFile);
-    console.log(`[VIDEO DOWNLOAD] SUCCESS: File downloaded successfully to: ${actualPath}`);
+    const pushData = await pushResponse.json();
+    const jobId = pushData.id;
+    console.log(`[VIDEO DOWNLOAD] Pushed job. ID: ${jobId}`);
 
-    return actualPath;
-  } catch (error) {
-    console.error(`[VIDEO DOWNLOAD] ERROR: Failed to download video: ${error}`);
+    // Step 2: Poll for job completion
+    console.log(`[VIDEO DOWNLOAD] Polling for job completion...`);
+    let jobInfo;
+    const statusUrl = `https://mango.sievedata.com/v2/jobs/${jobId}`;
+    
+    while (true) {
+      const statusResponse = await fetch(statusUrl, {
+        headers: {
+          'X-API-Key': process.env.SIEVE_API_KEY || ''
+        }
+      });
 
-    // Try an alternative approach if the first method fails
-    try {
-      console.log(`[VIDEO DOWNLOAD] Attempting alternative download method...`);
-      execSync(
-        `yt-dlp --no-check-certificate --extractor-args "youtube:player_client=android" -o "${baseOutputPath}" "${url}"`,
-        { stdio: 'pipe' }
-      );
-
-      console.log(`[VIDEO DOWNLOAD] Alternative download completed`);
-
-      // Find the actual downloaded file which might have a different extension
-      const files = fs.readdirSync(downloadsDir);
-      const downloadedFile = files.find(file => file.startsWith(videoId));
-
-      if (!downloadedFile) {
-        console.error(`[VIDEO DOWNLOAD] ERROR: Downloaded file not found after alternative method with ID: ${videoId}`);
-        throw new Error(`Downloaded file not found with ID: ${videoId}`);
+      if (!statusResponse.ok) {
+        throw new Error(`Error polling job: ${statusResponse.status} - ${await statusResponse.text()}`);
       }
 
-      const actualPath = path.join(downloadsDir, downloadedFile);
-      console.log(`[VIDEO DOWNLOAD] SUCCESS: File downloaded successfully with alternative method to: ${actualPath}`);
+      jobInfo = await statusResponse.json();
+      const currentStatus = jobInfo.status;
+      console.log(`[VIDEO DOWNLOAD] Job ${jobId} status: ${currentStatus}`);
 
-      return actualPath;
-    } catch (fallbackError) {
-      console.error(`[VIDEO DOWNLOAD] ERROR: Alternative download method failed: ${fallbackError}`);
-      throw new Error('Failed to download video - YouTube may be blocking the request');
+      if (currentStatus === 'finished') {
+        break;
+      } else if (currentStatus === 'failed' || currentStatus === 'error') {
+        throw new Error(`Job ${jobId} did not complete successfully: ${JSON.stringify(jobInfo)}`);
+      }
+
+      // Wait 5 seconds before polling again
+      await new Promise(resolve => setTimeout(resolve, 5000));
     }
+
+    // Step 3: Extract output file URL
+    const outputs = jobInfo.outputs;
+    if (!outputs || outputs.length === 0) {
+      throw new Error('No outputs found in job info.');
+    }
+
+    const videoUrl = outputs[0]?.data?.url;
+    if (!videoUrl) {
+      throw new Error('No video URL found in outputs.');
+    }
+
+    console.log(`[VIDEO DOWNLOAD] Video download URL obtained: ${videoUrl}`);
+
+    // Step 4: Download the video file locally
+    console.log(`[VIDEO DOWNLOAD] Downloading video file to: ${outputPath}`);
+    const videoResponse = await fetch(videoUrl);
+    
+    if (!videoResponse.ok) {
+      throw new Error(`Failed to download video file: ${videoResponse.status}`);
+    }
+
+    const arrayBuffer = await videoResponse.arrayBuffer();
+    fs.writeFileSync(outputPath, Buffer.from(arrayBuffer));
+
+    console.log(`[VIDEO DOWNLOAD] SUCCESS: Video saved to ${outputPath}`);
+    return outputPath;
+
+  } catch (error) {
+    console.error(`[VIDEO DOWNLOAD] ERROR: Failed to download video: ${error}`);
+    throw new Error(`Failed to download video using Sieve API: ${error}`);
   }
 }
 
