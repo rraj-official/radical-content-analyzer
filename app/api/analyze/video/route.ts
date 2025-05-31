@@ -68,13 +68,13 @@ const chunksDir = path.join(tmpDir, 'chunks');
   }
 });
 
-// Helper function to download video from URL
-async function downloadVideo(url: string): Promise<string> {
-  const videoId = uuidv4();
-  const outputPath = path.join(downloadsDir, `${videoId}.mp4`);
+// Helper function to download audio from URL
+async function downloadAudio(url: string): Promise<string> {
+  const audioId = uuidv4();
+  const outputPath = path.join(audioDir, `${audioId}.mp3`);
 
   try {
-    console.log(`[VIDEO DOWNLOAD] Starting download from URL using Sieve API: ${url}`);
+    console.log(`[AUDIO DOWNLOAD] Starting audio download from URL using Sieve API: ${url}`);
     
     // Step 1: Push the download job to Sieve API
     const pushResponse = await fetch('https://mango.sievedata.com/v2/push', {
@@ -87,7 +87,7 @@ async function downloadVideo(url: string): Promise<string> {
         function: 'sieve/youtube-downloader',
         inputs: {
           url: url,
-          download_type: 'video',
+          download_type: 'audio',
           resolution: '360p',
           include_audio: true,
           start_time: 0,
@@ -109,10 +109,10 @@ async function downloadVideo(url: string): Promise<string> {
 
     const pushData = await pushResponse.json();
     const jobId = pushData.id;
-    console.log(`[VIDEO DOWNLOAD] Pushed job. ID: ${jobId}`);
+    console.log(`[AUDIO DOWNLOAD] Pushed job. ID: ${jobId}`);
 
     // Step 2: Poll for job completion
-    console.log(`[VIDEO DOWNLOAD] Polling for job completion...`);
+    console.log(`[AUDIO DOWNLOAD] Polling for job completion...`);
     let jobInfo;
     const statusUrl = `https://mango.sievedata.com/v2/jobs/${jobId}`;
     
@@ -129,7 +129,7 @@ async function downloadVideo(url: string): Promise<string> {
 
       jobInfo = await statusResponse.json();
       const currentStatus = jobInfo.status;
-      console.log(`[VIDEO DOWNLOAD] Job ${jobId} status: ${currentStatus}`);
+      console.log(`[AUDIO DOWNLOAD] Job ${jobId} status: ${currentStatus}`);
 
       if (currentStatus === 'finished') {
         break;
@@ -147,30 +147,30 @@ async function downloadVideo(url: string): Promise<string> {
       throw new Error('No outputs found in job info.');
     }
 
-    const videoUrl = outputs[0]?.data?.url;
-    if (!videoUrl) {
-      throw new Error('No video URL found in outputs.');
+    const audioUrl = outputs[0]?.data?.url;
+    if (!audioUrl) {
+      throw new Error('No audio URL found in outputs.');
     }
 
-    console.log(`[VIDEO DOWNLOAD] Video download URL obtained: ${videoUrl}`);
+    console.log(`[AUDIO DOWNLOAD] Audio download URL obtained: ${audioUrl}`);
 
-    // Step 4: Download the video file locally
-    console.log(`[VIDEO DOWNLOAD] Downloading video file to: ${outputPath}`);
-    const videoResponse = await fetch(videoUrl);
+    // Step 4: Download the audio file locally
+    console.log(`[AUDIO DOWNLOAD] Downloading audio file to: ${outputPath}`);
+    const audioResponse = await fetch(audioUrl);
     
-    if (!videoResponse.ok) {
-      throw new Error(`Failed to download video file: ${videoResponse.status}`);
+    if (!audioResponse.ok) {
+      throw new Error(`Failed to download audio file: ${audioResponse.status}`);
     }
 
-    const arrayBuffer = await videoResponse.arrayBuffer();
+    const arrayBuffer = await audioResponse.arrayBuffer();
     fs.writeFileSync(outputPath, Buffer.from(arrayBuffer));
 
-    console.log(`[VIDEO DOWNLOAD] SUCCESS: Video saved to ${outputPath}`);
+    console.log(`[AUDIO DOWNLOAD] SUCCESS: Audio saved to ${outputPath}`);
     return outputPath;
 
   } catch (error) {
-    console.error(`[VIDEO DOWNLOAD] ERROR: Failed to download video: ${error}`);
-    throw new Error(`Failed to download video using Sieve API: ${error}`);
+    console.error(`[AUDIO DOWNLOAD] ERROR: Failed to download audio: ${error}`);
+    throw new Error(`Failed to download audio using Sieve API: ${error}`);
   }
 }
 
@@ -237,8 +237,9 @@ async function splitAudioToChunks(audioPath: string, chunkDurationMs: number = 6
       const chunkPath = path.join(chunksDir, `${audioId}_chunk_${i}.wav`);
 
       console.log(`[AUDIO SPLITTING] Creating chunk ${i+1}/${totalChunks} at ${chunkPath}`);
+      // Convert MP3 to WAV format with 16kHz mono for Google Speech API
       execSync(
-        `ffmpeg -i "${audioPath}" -ss ${startTime} -t ${chunkDurationMs/1000} -c copy "${chunkPath}"`,
+        `ffmpeg -i "${audioPath}" -ss ${startTime} -t ${chunkDurationMs/1000} -vn -acodec pcm_s16le -ar 16000 -ac 1 "${chunkPath}"`,
         { stdio: 'pipe' }
       );
 
@@ -551,20 +552,16 @@ async function processVideoUrl(url: string): Promise<any> {
   try {
     console.log(`[PROCESS] Starting video analysis process for URL: ${url}`);
 
-    // Step 1: Download video
-    console.log(`[PROCESS] Step 1: Downloading video`);
-    const videoPath = await downloadVideo(url);
+    // Step 1: Download audio
+    console.log(`[PROCESS] Step 1: Downloading audio`);
+    const audioPath = await downloadAudio(url);
 
-    // Step 2: Extract audio
-    console.log(`[PROCESS] Step 2: Extracting audio`);
-    const audioPath = await extractAudio(videoPath);
-
-    // Step 3: Split audio into chunks
-    console.log(`[PROCESS] Step 3: Splitting audio into chunks`);
+    // Step 2: Split audio into chunks
+    console.log(`[PROCESS] Step 2: Splitting audio into chunks`);
     const chunkPaths = await splitAudioToChunks(audioPath);
 
-    // Step 4: Transcribe each chunk in both English & Hindi
-    console.log(`[PROCESS] Step 4: Transcribing audio chunks`);
+    // Step 3: Transcribe each chunk in both English & Hindi
+    console.log(`[PROCESS] Step 3: Transcribing audio chunks`);
     let englishTranscript = '';
     let hindiTranscript = '';
 
@@ -589,8 +586,8 @@ async function processVideoUrl(url: string): Promise<any> {
     console.log(`[PROCESS] English transcript length: ${englishTranscript.length} chars`);
     console.log(`[PROCESS] Hindi transcript length: ${hindiTranscript.length} chars`);
 
-    // Step 5: Analyze transcript with OpenAI
-    console.log(`[PROCESS] Step 5: Analyzing transcript with OpenAI`);
+    // Step 4: Analyze transcript with OpenAI
+    console.log(`[PROCESS] Step 4: Analyzing transcript with OpenAI`);
     const analysis = await analyzeTranscript({
       english: englishTranscript.trim(),
       hindi: hindiTranscript.trim()
@@ -603,8 +600,8 @@ async function processVideoUrl(url: string): Promise<any> {
     // Generate a unique analysis ID
     const analysisId = `video-analysis-${uuidv4()}`;
 
-    // Step 6: Format and return the result
-    console.log(`[PROCESS] Step 6: Formatting final result with ID: ${analysisId}`);
+    // Step 5: Format and return the result
+    console.log(`[PROCESS] Step 5: Formatting final result with ID: ${analysisId}`);
     const result = {
       type: "video",
       analysisId: analysisId,
@@ -626,7 +623,7 @@ async function processVideoUrl(url: string): Promise<any> {
 
     // Cleanup files
     console.log(`[PROCESS] Cleaning up temporary files`);
-    cleanupFiles([videoPath, audioPath, ...chunkPaths]);
+    cleanupFiles([audioPath, ...chunkPaths]);
 
     return result;
   } catch (error) {
