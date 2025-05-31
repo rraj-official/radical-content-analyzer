@@ -57,12 +57,12 @@ const storageClient = new Storage({ credentials: googleCredentials });
 const bucketName = process.env.GOOGLE_CLOUD_STORAGE_BUCKET || 'hackathon_police';
 
 // Ensure temp directories exist
-const tmpDir = path.join(process.cwd(), 'tmp');
+const tmpDir = '/tmp';
 const downloadsDir = path.join(tmpDir, 'downloads');
 const audioDir = path.join(tmpDir, 'audio');
 const chunksDir = path.join(tmpDir, 'chunks');
 
-[tmpDir, downloadsDir, audioDir, chunksDir].forEach(dir => {
+[downloadsDir, audioDir, chunksDir].forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }

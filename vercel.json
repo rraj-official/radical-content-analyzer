@@ -1,0 +1,15 @@
+{
+  "functions": {
+    "app/api/analyze/video/route.ts": {
+      "maxDuration": 300,
+      "memory": 3008
+    },
+    "app/api/analyze/video-file/route.ts": {
+      "maxDuration": 300,
+      "memory": 3008
+    }
+  },
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install"
+} 
