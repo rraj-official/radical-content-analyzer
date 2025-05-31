@@ -93,27 +93,94 @@ function parseYouTubeISO8601Duration(durationIso: string) {
 
 async function getYoutubeVideoInfo(videoId: string) {
   try {
-    const res = await fetch(
-      `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}&part=contentDetails,snippet`
-    );
-    if (!res.ok) throw new Error("Failed to fetch video data from YouTube Data API");
+    console.log(`[YOUTUBE API] Fetching info for video ID: ${videoId}`);
+    
+    // Check if API key is available
+    const apiKey = process.env.NEXT_PUBLIC_YOUTUBE_API_KEY;
+    if (!apiKey) {
+      console.error("[YOUTUBE API] ERROR: NEXT_PUBLIC_YOUTUBE_API_KEY is not set");
+      console.log("[YOUTUBE API] Falling back to oEmbed API...");
+      return await getYoutubeVideoInfoFallback(videoId);
+    }
+    
+    console.log(`[YOUTUBE API] Using API key: ${apiKey.substring(0, 10)}...`);
+    
+    const apiUrl = `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${apiKey}&part=contentDetails,snippet`;
+    console.log(`[YOUTUBE API] Making request to: ${apiUrl.replace(apiKey, 'API_KEY_HIDDEN')}`);
+    
+    const res = await fetch(apiUrl);
+    
+    console.log(`[YOUTUBE API] Response status: ${res.status} ${res.statusText}`);
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`[YOUTUBE API] API Error Response: ${errorText}`);
+      console.log("[YOUTUBE API] Falling back to oEmbed API...");
+      return await getYoutubeVideoInfoFallback(videoId);
+    }
 
     const data = await res.json();
-    if (!data.items?.length) throw new Error("No items returned from YouTube Data API");
+    console.log(`[YOUTUBE API] Response data:`, data);
+    
+    if (!data.items?.length) {
+      console.error("[YOUTUBE API] ERROR: No items returned from YouTube Data API");
+      console.log("[YOUTUBE API] Full response:", data);
+      console.log("[YOUTUBE API] Falling back to oEmbed API...");
+      return await getYoutubeVideoInfoFallback(videoId);
+    }
 
     const snippet = data.items[0].snippet;
     const contentDetails = data.items[0].contentDetails;
+    
+    console.log(`[YOUTUBE API] Video title: ${snippet?.title}`);
+    console.log(`[YOUTUBE API] Video duration: ${contentDetails?.duration}`);
+    
     // e.g. contentDetails.duration = "PT3M57S"
     const durationIso8601 = contentDetails.duration;
     const duration = parseYouTubeISO8601Duration(durationIso8601);
 
-    return {
+    const result = {
       thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-      title: snippet.title,
+      title: snippet.title || "Title Unavailable",
       duration, // finally we have the actual duration
     };
+    
+    console.log(`[YOUTUBE API] SUCCESS: Returning video info:`, result);
+    return result;
   } catch (error) {
-    console.error("Error fetching video duration:", error);
+    console.error("[YOUTUBE API] ERROR: Failed to fetch video info:", error);
+    console.log("[YOUTUBE API] Falling back to oEmbed API...");
+    return await getYoutubeVideoInfoFallback(videoId);
+  }
+}
+
+// Fallback function using YouTube oEmbed API (no API key required)
+async function getYoutubeVideoInfoFallback(videoId: string) {
+  try {
+    console.log(`[YOUTUBE FALLBACK] Using oEmbed API for video ID: ${videoId}`);
+    
+    const oEmbedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+    const res = await fetch(oEmbedUrl);
+    
+    if (!res.ok) {
+      throw new Error(`oEmbed API failed: ${res.status} ${res.statusText}`);
+    }
+    
+    const data = await res.json();
+    console.log(`[YOUTUBE FALLBACK] oEmbed response:`, data);
+    
+    const result = {
+      thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+      title: data.title || "Video Title Unavailable",
+      duration: "Unknown", // oEmbed doesn't provide duration
+    };
+    
+    console.log(`[YOUTUBE FALLBACK] SUCCESS: Returning video info:`, result);
+    return result;
+  } catch (error) {
+    console.error("[YOUTUBE FALLBACK] ERROR: Failed to fetch video info via oEmbed:", error);
+    
+    // Final fallback
     return {
       thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
       title: "Video Title Unavailable",
@@ -121,7 +188,6 @@ async function getYoutubeVideoInfo(videoId: string) {
     };
   }
 }
-
 
   // ———————————————————————————————————————————————
   //    (Main function that calls the /api/analyze/video)
