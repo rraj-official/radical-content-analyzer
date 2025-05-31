@@ -176,13 +176,45 @@ export async function processWebsite(url: string, options?: any) {
 export async function analyzeVideoUrl(url: string) {
   // Call the video analysis API
   try {
-    // Use absolute URL format with origin for server-side fetch
-    const origin =
-      process.env.NODE_ENV === 'production' && process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : 'http://localhost:3000';
-    console.log('Origin:', origin);
-    const response = await fetch(`${origin}/api/analyze/video`, {
+    // Improved URL construction for Vercel deployments
+    let origin;
+    
+    if (process.env.NODE_ENV === 'production') {
+      // In production on Vercel, try multiple approaches to get the correct URL
+      if (process.env.VERCEL_URL) {
+        origin = `https://${process.env.VERCEL_URL}`;
+      } else if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+        origin = `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+      } else if (process.env.VERCEL_BRANCH_URL) {
+        origin = `https://${process.env.VERCEL_BRANCH_URL}`;
+      } else {
+        // Fallback - try to extract from headers if this is running in a request context
+        const headers = await import('next/headers');
+        try {
+          const host = headers.headers().get('host');
+          origin = host ? `https://${host}` : 'https://localhost:3000';
+        } catch {
+          // If headers are not available, use a fallback
+          origin = 'https://localhost:3000';
+        }
+      }
+    } else {
+      // Development environment
+      origin = 'http://localhost:3000';
+    }
+    
+    console.log('🌐 Using origin for API call:', origin);
+    console.log('🔧 Environment variables available:', {
+      NODE_ENV: process.env.NODE_ENV,
+      VERCEL_URL: process.env.VERCEL_URL,
+      VERCEL_PROJECT_PRODUCTION_URL: process.env.VERCEL_PROJECT_PRODUCTION_URL,
+      VERCEL_BRANCH_URL: process.env.VERCEL_BRANCH_URL,
+    });
+
+    const apiUrl = `${origin}/api/analyze/video`;
+    console.log('📡 Making API call to:', apiUrl);
+    
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -190,15 +222,33 @@ export async function analyzeVideoUrl(url: string) {
       body: JSON.stringify({ url }),
     });
 
+    console.log('📡 API Response status:', response.status);
+    console.log('📡 API Response headers:', Object.fromEntries(response.headers.entries()));
+
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to analyze video');
+      console.error('❌ API Response not ok:', response.status, response.statusText);
+      
+      // Try to get error details
+      let errorData;
+      const contentType = response.headers.get('content-type');
+      
+      if (contentType && contentType.includes('application/json')) {
+        errorData = await response.json();
+      } else {
+        // If it's HTML or another format, it means we hit the wrong endpoint
+        const textResponse = await response.text();
+        console.error('❌ Received non-JSON response (likely HTML error page):', textResponse.substring(0, 200));
+        throw new Error(`API endpoint not found or returned HTML. Check if the API route exists at ${apiUrl}`);
+      }
+      
+      throw new Error(errorData?.error || `HTTP ${response.status}: Failed to analyze video`);
     }
 
     const result = await response.json();
+    console.log('✅ API call successful, received result');
     return result;
   } catch (error) {
-    console.error('Error analyzing video:', error);
+    console.error('❌ Error analyzing video:', error);
     throw error;
   }
 }
@@ -206,26 +256,69 @@ export async function analyzeVideoUrl(url: string) {
 export async function analyzeVideoFile(formData: FormData) {
   // Call the video file analysis API
   try {
-    // Use absolute URL format with origin for server-side fetch
-    const origin =
-      process.env.NODE_ENV === 'production' && process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : 'http://localhost:3000';
-    console.log('Origin:', origin);
-    const response = await fetch(`${origin}/api/analyze/video-file`, {
+    // Improved URL construction for Vercel deployments (same as analyzeVideoUrl)
+    let origin;
+    
+    if (process.env.NODE_ENV === 'production') {
+      // In production on Vercel, try multiple approaches to get the correct URL
+      if (process.env.VERCEL_URL) {
+        origin = `https://${process.env.VERCEL_URL}`;
+      } else if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+        origin = `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+      } else if (process.env.VERCEL_BRANCH_URL) {
+        origin = `https://${process.env.VERCEL_BRANCH_URL}`;
+      } else {
+        // Fallback - try to extract from headers if this is running in a request context
+        const headers = await import('next/headers');
+        try {
+          const host = headers.headers().get('host');
+          origin = host ? `https://${host}` : 'https://localhost:3000';
+        } catch {
+          // If headers are not available, use a fallback
+          origin = 'https://localhost:3000';
+        }
+      }
+    } else {
+      // Development environment
+      origin = 'http://localhost:3000';
+    }
+    
+    console.log('🌐 Using origin for video file API call:', origin);
+    
+    const apiUrl = `${origin}/api/analyze/video-file`;
+    console.log('📡 Making video file API call to:', apiUrl);
+    
+    const response = await fetch(apiUrl, {
       method: 'POST',
       body: formData,
     });
 
+    console.log('📡 Video file API Response status:', response.status);
+
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to analyze video file');
+      console.error('❌ Video file API Response not ok:', response.status, response.statusText);
+      
+      // Try to get error details
+      let errorData;
+      const contentType = response.headers.get('content-type');
+      
+      if (contentType && contentType.includes('application/json')) {
+        errorData = await response.json();
+      } else {
+        // If it's HTML or another format, it means we hit the wrong endpoint
+        const textResponse = await response.text();
+        console.error('❌ Received non-JSON response (likely HTML error page):', textResponse.substring(0, 200));
+        throw new Error(`API endpoint not found or returned HTML. Check if the API route exists at ${apiUrl}`);
+      }
+      
+      throw new Error(errorData?.error || `HTTP ${response.status}: Failed to analyze video file`);
     }
 
     const result = await response.json();
+    console.log('✅ Video file API call successful, received result');
     return result;
   } catch (error) {
-    console.error('Error analyzing video file:', error);
+    console.error('❌ Error analyzing video file:', error);
     throw error;
   }
 }

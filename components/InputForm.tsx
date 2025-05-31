@@ -24,7 +24,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { analyzeVideoUrl } from "@/app/actions/serverActions";
 
 export default function InputForm() {
   const [inputMethod, setInputMethod] = useState<
@@ -199,7 +198,33 @@ async function getYoutubeVideoInfoFallback(videoId: string) {
 
       toast.info("Starting video analysis process. This may take several minutes...");
 
-      const responseData = await analyzeVideoUrl(url);
+      // Make direct API call instead of using server action for better Vercel compatibility
+      console.log("📡 Making direct API call to /api/analyze/video");
+      const response = await fetch('/api/analyze/video', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url }),
+      });
+
+      console.log("📡 API Response status:", response.status);
+      
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type');
+        
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `HTTP ${response.status}: Failed to analyze video`);
+        } else {
+          // If it's HTML, we likely hit a 404 or routing issue
+          const textResponse = await response.text();
+          console.error("❌ Received HTML instead of JSON:", textResponse.substring(0, 200));
+          throw new Error("API endpoint not found. Please check your deployment configuration.");
+        }
+      }
+
+      const responseData = await response.json();
       console.log("📡 API response data:", responseData);
 
       if (!responseData || (!responseData.analysisId && !responseData.success)) {
