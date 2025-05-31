@@ -20,6 +20,15 @@ const nextConfig = {
       },
     ],
   },
+  experimental: {
+    missingSuspenseWithCSRBailout: false,
+  },
+  // Disable static generation for error pages
+  generateBuildId: async () => {
+    return 'build-id'
+  },
+  // Force dynamic rendering
+  output: 'standalone',
 };
 
 export default nextConfig;

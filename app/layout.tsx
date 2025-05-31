@@ -9,6 +9,10 @@ import { ModeToggle } from "@/components/ui/mode-toggle";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AnalysisProgressProvider } from "@/lib/contexts/AnalysisProgressContext";
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 const satoshi = localFont({
   src: "/fonts/Satoshi.ttf",
   variable: "--font-satoshi",
