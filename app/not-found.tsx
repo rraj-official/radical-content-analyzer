@@ -2,6 +2,10 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { HomeIcon, AlertTriangleIcon } from "lucide-react";
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default function NotFound() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[70vh] text-center px-4">
