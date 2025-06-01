@@ -73,6 +73,20 @@ export default function AboutUs() {
               <p className="text-lg text-gray-600 dark:text-gray-300 font-light italic">(Hon&apos;ble Chief Minister of Goa)</p>
             </div>
 
+            {/* Developed by section */}
+            <div className="flex justify-center mb-6">
+              <span className="text-red-600 font-bold text-base">Developed by:</span>
+            </div>
+            <div className="flex flex-wrap justify-center gap-3 mb-8">
+              <span className="text-gray-700 dark:text-gray-200 text-sm">Rohit Raj</span>
+              <span className="text-gray-400 dark:text-gray-500">•</span>
+              <span className="text-gray-700 dark:text-gray-200 text-sm">Akshat Gosain</span>
+              <span className="text-gray-400 dark:text-gray-500">•</span>
+              <span className="text-gray-700 dark:text-gray-200 text-sm">Gaurav Singh</span>
+              <span className="text-gray-400 dark:text-gray-500">•</span>
+              <span className="text-gray-700 dark:text-gray-200 text-sm">Utkarsh Dwivedi</span>
+            </div>
+
             {/* Collaboration Cards */}
             <div className="flex justify-center mb-4">
               <span className="text-red-600 font-bold text-base">Supported by:</span>
