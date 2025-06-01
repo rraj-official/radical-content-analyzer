@@ -64,7 +64,13 @@ export default function RootLayout({
                       priority
                     /> */}
                   </Link>
-                  <div className="flex items-center">
+                  <div className="flex items-center gap-3">
+                    <Link 
+                      href="/about" 
+                      className="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 transition-colors duration-200 rounded-md shadow-sm hover:shadow-md"
+                    >
+                      About Us
+                    </Link>
                     <ModeToggle />
                   </div>
                 </header>

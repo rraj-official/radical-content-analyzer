@@ -15,6 +15,27 @@ export default function HeroSection() {
         />
       </div>
       
+      {/* Supported by logos */}
+      <div className="flex flex-col items-center gap-2 animate-fade-in" style={{ animationDelay: '80ms' }}>
+        <span className="text-sm md:text-base text-muted-foreground font-medium tracking-wide">Supported by</span>
+        <div className="flex flex-row items-center gap-6 mt-1">
+          <Image
+            src="/images/BITS_Pilani-Logo.png"
+            alt="BITS Pilani Logo"
+            width={60}
+            height={60}
+            className="object-contain h-12 w-12 md:h-16 md:w-16"
+          />
+          <Image
+            src="/images/Goa_Police.png"
+            alt="Goa Police Logo"
+            width={60}
+            height={60}
+            className="object-contain h-12 w-12 md:h-16 md:w-16"
+          />
+        </div>
+      </div>
+      
       <div className="flex flex-col items-center gap-4 text-center">
         <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight animate-slide-up">
           <span className="bg-clip-text text-transparent bg-gradient-to-r from-red-500 to-red-500 dark:from-red-400 dark:to-red-400">

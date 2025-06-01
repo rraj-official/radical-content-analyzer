@@ -373,7 +373,8 @@ async function getYoutubeVideoInfoFallback(videoId: string) {
   //      (Drag/Drop logic and file upload bits)
   // ———————————————————————————————————————————————
   const [fileHover, setFileHover] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoFileInputRef = useRef<HTMLInputElement>(null);
+  const documentFileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | undefined>(undefined);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -625,7 +626,6 @@ async function getYoutubeVideoInfoFallback(videoId: string) {
                       disabled={isLoading || Boolean(videoInfo && !videoInfo.isLoading)}
                       onChange={(e) => setInputUrl(e.target.value)}
                       placeholder="https://youtube.com/watch?v=..."
-                      autoFocus
                       className="pr-10 transition-all duration-150 border-input/60 focus-visible:border-primary/60 h-9"
                       onKeyDown={(e) => {
                         if (
@@ -943,7 +943,7 @@ async function getYoutubeVideoInfoFallback(videoId: string) {
                       }
                     }}
                     onClick={() =>
-                      inputMethod === "video" && !isLoading && fileInputRef.current?.click()
+                      inputMethod === "video" && !isLoading && videoFileInputRef.current?.click()
                     }
                   >
                     <div
@@ -973,7 +973,7 @@ async function getYoutubeVideoInfoFallback(videoId: string) {
                     <input
                       type="file"
                       accept="video/*"
-                      ref={fileInputRef}
+                      ref={videoFileInputRef}
                       onChange={handleFileChange}
                       disabled={isLoading}
                       hidden
@@ -1057,7 +1057,7 @@ async function getYoutubeVideoInfoFallback(videoId: string) {
                       }
                     }}
                     onClick={() =>
-                      inputMethod === "document" && !isLoading && fileInputRef.current?.click()
+                      inputMethod === "document" && !isLoading && documentFileInputRef.current?.click()
                     }
                   >
                     <div
@@ -1087,7 +1087,7 @@ async function getYoutubeVideoInfoFallback(videoId: string) {
                     <input
                       type="file"
                       accept=".txt,text/plain"
-                      ref={fileInputRef}
+                      ref={documentFileInputRef}
                       onChange={handleFileChange}
                       disabled={isLoading}
                       hidden

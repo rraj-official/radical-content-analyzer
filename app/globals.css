@@ -37,6 +37,11 @@ body {
   to { transform: translateY(0); opacity: 1; }
 }
 
+@keyframes fadeInUp {
+  from { transform: translateY(30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
 @keyframes pulse {
   0% { transform: scale(1); }
   50% { transform: scale(1.03); }
@@ -49,6 +54,10 @@ body {
 
 .animate-slide-up {
   animation: slideUp 0.3s ease-out forwards;
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.7s ease-out forwards;
 }
 
 .animate-pulse-slow {

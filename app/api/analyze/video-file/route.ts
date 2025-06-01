@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { SpeechClient } from '@google-cloud/speech';
 import { Storage } from '@google-cloud/storage';
 import OpenAI from 'openai';
 import { VideoAnalysisResult } from '@/lib/interfaces';
+import pLimit from 'p-limit';
+
+const ffmpeg = require('fluent-ffmpeg');
 
 // -----------------------------
 // HELPER FUNCTIONS (shared with video URL route)
@@ -56,7 +58,9 @@ const speechClient = new SpeechClient({ credentials: googleCredentials });
 const storageClient = new Storage({ credentials: googleCredentials });
 const bucketName = process.env.GOOGLE_CLOUD_STORAGE_BUCKET || 'hackathon_police';
 
-// Ensure temp directories exist
+// -----------------------------
+// ENSURE TEMP DIRECTORIES EXIST
+// -----------------------------
 const tmpDir = '/tmp';
 const downloadsDir = path.join(tmpDir, 'downloads');
 const audioDir = path.join(tmpDir, 'audio');
@@ -68,7 +72,9 @@ const chunksDir = path.join(tmpDir, 'chunks');
   }
 });
 
-// Helper function to save uploaded file
+// -----------------------------
+// HELPER FUNCTION: SAVE UPLOADED FILE
+// -----------------------------
 async function saveUploadedFile(file: File): Promise<string> {
   const videoId = uuidv4();
   const fileExtension = path.extname(file.name) || '.mp4';
@@ -92,107 +98,109 @@ async function saveUploadedFile(file: File): Promise<string> {
   }
 }
 
-// Helper function to extract audio from video
+// -----------------------------
+// HELPER FUNCTION: EXTRACT AUDIO FROM VIDEO (FLUENT-FFMPEG)
+// -----------------------------
 async function extractAudio(videoPath: string): Promise<string> {
   const audioId = path.basename(videoPath, path.extname(videoPath));
   const outputPath = path.join(audioDir, `${audioId}.wav`);
 
-  try {
-    // Verify input file exists before processing
-    if (!fs.existsSync(videoPath)) {
-      console.error(`[AUDIO EXTRACTION] ERROR: Input video file not found at ${videoPath}`);
-      throw new Error(`Input video file not found at ${videoPath}`);
-    }
-
-    console.log(`[AUDIO EXTRACTION] Starting audio extraction from video: ${videoPath}`);
-    console.log(`[AUDIO EXTRACTION] Target audio output: ${outputPath}`);
-
-    // Extract audio using ffmpeg, convert to 16kHz mono WAV
-    execSync(
-      `ffmpeg -i "${videoPath}" -vn -acodec pcm_s16le -ar 16000 -ac 1 "${outputPath}"`,
-      {
-        stdio: 'pipe',
-        encoding: 'utf-8',
-        maxBuffer: 10 * 1024 * 1024
-      }
-    );
-
-    // Verify the output file was created
-    if (!fs.existsSync(outputPath)) {
-      console.error(`[AUDIO EXTRACTION] ERROR: Output audio file was not created at ${outputPath}`);
-      throw new Error(`Output audio file was not created at ${outputPath}`);
-    }
-
-    console.log(`[AUDIO EXTRACTION] SUCCESS: Audio extracted successfully to: ${outputPath}`);
-    return outputPath;
-  } catch (error: any) {
-    console.error(`[AUDIO EXTRACTION] ERROR: Failed to extract audio: ${error.message}`);
-    throw new Error(`Failed to extract audio from video: ${error.message || 'Unknown error'}`);
+  if (!fs.existsSync(videoPath)) {
+    console.error(`[AUDIO EXTRACTION] ERROR: Input video file not found at ${videoPath}`);
+    throw new Error(`Input video file not found at ${videoPath}`);
   }
+
+  return new Promise((resolve, reject) => {
+    console.log(`[AUDIO EXTRACTION] Starting audio extraction from ${videoPath}`);
+    
+    ffmpeg(videoPath)
+      .noVideo()
+      .audioCodec('pcm_s16le')
+      .audioFrequency(16000)
+      .audioChannels(1)
+      .output(outputPath)
+      .on('start', (commandLine: string) => {
+        console.log(`[AUDIO EXTRACTION] FFmpeg command: ${commandLine}`);
+      })
+      .on('progress', (progress: any) => {
+        console.log(`[AUDIO EXTRACTION] Progress: ${Math.round(progress.percent || 0)}%`);
+      })
+      .on('end', () => {
+        console.log(`[AUDIO EXTRACTION] SUCCESS: Audio extracted to ${outputPath}`);
+        resolve(outputPath);
+      })
+      .on('error', (err: Error) => {
+        console.error(`[AUDIO EXTRACTION] ERROR: ${err.message}`);
+        reject(new Error(`Failed to extract audio: ${err.message}`));
+      })
+      .run();
+  });
 }
 
-// Helper function to split audio into chunks
-async function splitAudioToChunks(audioPath: string, chunkDurationMs: number = 60000): Promise<string[]> {
-  const audioId = path.basename(audioPath, path.extname(audioPath));
-  const chunkPaths: string[] = [];
+// -----------------------------
+// HELPER FUNCTION: SPLIT AUDIO INTO CHUNKS (FLUENT-FFMPEG)
+// -----------------------------
+async function splitAudioToChunks(
+  audioPath: string,
+  chunkDurationMs: number = 60_000,
+): Promise<string[]> {
+  const base     = path.basename(audioPath, path.extname(audioPath));
+  const pattern  = path.join(chunksDir, `${base}_chunk_%03d.wav`);
+  const chunkSec = chunkDurationMs / 1000;
 
-  try {
-    console.log(`[AUDIO SPLITTING] Starting to split audio file: ${audioPath}`);
-    console.log(`[AUDIO SPLITTING] Chunk duration: ${chunkDurationMs}ms`);
+  return new Promise((resolve, reject) => {
+    ffmpeg(audioPath)
+      /* Re-encode so every output file is 16-kHz, mono, LINEAR16 PCM */
+      .audioCodec('pcm_s16le')
+      .audioFrequency(16000)
+      .audioChannels(1)
+      .outputOptions([
+        '-f', 'segment',                // segment muxer: one pass
+        '-segment_time', String(chunkSec),
+      ])
+      .output(pattern)
+      .on('start', (cmd: string) =>
+        console.log(`[AUDIO SPLITTING] ffmpeg command: ${cmd}`),
+      )
+      .on('end', () => {
+        // collect all created chunk paths in order
+        const chunks = fs
+          .readdirSync(chunksDir)
+          .filter((f) => f.startsWith(`${base}_chunk_`))
+          .sort()
+          .map((f) => path.join(chunksDir, f));
 
-    // Get audio duration in seconds
-    const durationOutput = execSync(
-      `ffprobe -i "${audioPath}" -show_entries format=duration -v quiet -of csv="p=0"`,
-      { encoding: 'utf-8' }
-    );
-    const durationSeconds = parseFloat(durationOutput.trim());
-    const totalChunks = Math.ceil((durationSeconds * 1000) / chunkDurationMs);
-
-    console.log(`[AUDIO SPLITTING] Audio duration: ${durationSeconds}s, creating ${totalChunks} chunks`);
-
-    for (let i = 0; i < totalChunks; i++) {
-      const startTime = i * (chunkDurationMs / 1000);
-      const chunkPath = path.join(chunksDir, `${audioId}_chunk_${i}.wav`);
-
-      console.log(`[AUDIO SPLITTING] Creating chunk ${i+1}/${totalChunks} at ${chunkPath}`);
-      execSync(
-        `ffmpeg -i "${audioPath}" -ss ${startTime} -t ${chunkDurationMs/1000} -c copy "${chunkPath}"`,
-        { stdio: 'pipe' }
-      );
-
-      if (fs.existsSync(chunkPath)) {
-        chunkPaths.push(chunkPath);
-        console.log(`[AUDIO SPLITTING] SUCCESS: Chunk ${i+1} created at ${chunkPath}`);
-      } else {
-        console.warn(`[AUDIO SPLITTING] WARNING: Chunk ${i+1} was not created properly`);
-      }
-    }
-
-    console.log(`[AUDIO SPLITTING] SUCCESS: Created ${chunkPaths.length} audio chunks`);
-    return chunkPaths;
-  } catch (error: any) {
-    console.error(`[AUDIO SPLITTING] ERROR: Failed to split audio: ${error.message}`);
-    throw new Error(`Failed to split audio into chunks: ${error.message || 'Unknown error'}`);
-  }
+        console.log(
+          `[AUDIO SPLITTING] SUCCESS: created ${chunks.length} chunks`,
+        );
+        resolve(chunks);
+      })
+      .on('error', (err: Error) =>
+        reject(new Error(`Failed to split audio: ${err.message}`)),
+      )
+      .run();
+  });
 }
 
-// Helper function to upload file to Google Cloud Storage
+// -----------------------------
+// HELPER FUNCTION: UPLOAD AUDIO TO GCS
+// -----------------------------
 async function uploadToGCS(filePath: string): Promise<string> {
+  const fileName = path.basename(filePath);
+  const bucket = storageClient.bucket(bucketName);
+  const file = bucket.file(fileName);
+
   try {
     console.log(`[GCS UPLOAD] Starting upload: ${filePath}`);
-
-    const fileName = `audio-chunks/${path.basename(filePath)}`;
-    const file = storageClient.bucket(bucketName).file(fileName);
-
-    await file.save(fs.readFileSync(filePath), {
+    await bucket.upload(filePath, {
+      destination: fileName,
       metadata: {
         contentType: 'audio/wav',
       },
     });
 
     const gcsUri = `gs://${bucketName}/${fileName}`;
-    console.log(`[GCS UPLOAD] SUCCESS: File uploaded to ${gcsUri}`);
-
+    console.log(`[GCS UPLOAD] SUCCESS: Uploaded to ${gcsUri}`);
     return gcsUri;
   } catch (error) {
     console.error(`[GCS UPLOAD] ERROR: Failed to upload to GCS: ${error}`);
@@ -200,11 +208,12 @@ async function uploadToGCS(filePath: string): Promise<string> {
   }
 }
 
-// Helper function to transcribe audio using Google Speech API
+// -----------------------------
+// HELPER FUNCTION: TRANSCRIBE AUDIO USING GOOGLE SPEECH API
+// -----------------------------
 async function transcribeAudio(gcsUri: string, languageCode: string = 'en-US'): Promise<string> {
   try {
     console.log(`[TRANSCRIPTION] Starting transcription for ${gcsUri}`);
-    console.log(`[TRANSCRIPTION] Language: ${languageCode}`);
 
     const audio = { uri: gcsUri };
     const config = {
@@ -215,116 +224,126 @@ async function transcribeAudio(gcsUri: string, languageCode: string = 'en-US'): 
     };
 
     const request = { audio, config };
-    const [response] = await speechClient.recognize(request);
 
-    if (!response.results || response.results.length === 0) {
-      console.log(`[TRANSCRIPTION] WARNING: No transcription results for ${gcsUri}`);
-      return '';
+    console.log(`[TRANSCRIPTION] Sending request to Google Speech API`);
+    const [operation] = await speechClient.longRunningRecognize(request);
+    console.log(`[TRANSCRIPTION] Waiting for operation to complete...`);
+
+    const [response] = await operation.promise();
+
+    let transcript = '';
+    if (response?.results) {
+      response.results.forEach((result) => {
+        if (result?.alternatives?.[0]?.transcript) {
+          transcript += result.alternatives[0].transcript + ' ';
+        }
+      });
     }
 
-    const transcription = response.results
-      .map(result => result.alternatives?.[0]?.transcript || '')
-      .join(' ');
+    const truncatedTranscript = transcript.length > 100 ? transcript.substring(0, 100) + '...' : transcript;
+    console.log(`[TRANSCRIPTION] SUCCESS: Transcript length ${transcript.length} chars`);
+    console.log(`[TRANSCRIPTION] Preview: ${truncatedTranscript}`);
 
-    console.log(`[TRANSCRIPTION] SUCCESS: Transcribed ${transcription.length} characters`);
-    return transcription;
+    return transcript.trim();
   } catch (error) {
-    console.error(`[TRANSCRIPTION] ERROR: Failed to transcribe ${gcsUri}: ${error}`);
-    // Return empty string instead of throwing to allow partial analysis
-    return '';
+    console.error(`[TRANSCRIPTION] ERROR: Failed to transcribe audio (${languageCode}): ${error}`);
+    throw new Error(`Failed to transcribe audio in ${languageCode}`);
   }
 }
 
-// Helper function to analyze transcript with OpenAI
+// -----------------------------
+// HELPER FUNCTION: ANALYZE TRANSCRIPT USING OPENAI
+// -----------------------------
 async function analyzeTranscript(transcript: { english: string; hindi: string }): Promise<any> {
   try {
     console.log(`[ANALYSIS] Starting OpenAI analysis`);
-    console.log(`[ANALYSIS] English transcript length: ${transcript.english.length} chars`);
-    console.log(`[ANALYSIS] Hindi transcript length: ${transcript.hindi.length} chars`);
-
-    const combinedText = `
-English Transcript:
-${transcript.english}
-
-Hindi Transcript:
-${transcript.hindi}
-    `.trim();
+    console.log(`[ANALYSIS] English length: ${transcript.english.length} chars`);
+    console.log(`[ANALYSIS] Hindi length: ${transcript.hindi.length} chars`);
 
     const prompt = `
-You are an expert analyst specializing in detecting radical and extremist content in video transcripts. Please analyze the following video transcript(s) and provide a comprehensive assessment.
+You are tasked with analyzing transcripts of speeches or text content that might include both Hindi and English sections. The transcript has been processed using two separate speech-to-text APIs: one for Hindi and one for English. Analyze the provided transcript carefully, understanding both languages, and return the analysis based on the following five parameters. The transcript might contain mixed Hindi and English parts, so ensure you identify the language for each section and analyze the radical or religiously inflammatory language accordingly
 
-TRANSCRIPT TO ANALYZE:
-${combinedText}
+Please analyze this content and assign scores for:
+1. Radical Probability (0-100): Likelihood that this content promotes radicalism
+2. Radical Content (0-100): Percentage of content that could be considered radical
 
-Please provide your analysis in the following structured format:
+Also provide detailed analysis in these categories:
+- Lexical Analysis: Identify radical or religious terminology in both Hindi and English, including exclusionary language (e.g., "us vs. them"), calls to action, or divisive rhetoric.
+- Emotion and Sentiment in Speech: Analyze the tone and sentiment in both languages. Look for negative emotions like anger or fear, which may incite followers or condemn opposing groups.
+- Speech Patterns and Intensity: Identify the use of high volume, repetition, or urgency in either language to emphasize points, typical in radical speech.
+- Use of Religious Rhetoric: Look for quotes from religious texts, apocalyptic themes, or divine rewards/punishments, considering the context in both Hindi and English.
+- Frequency of Commands and Directives: Examine the frequency of explicit calls to action (physical or ideological), in both languages.
 
-**LEXICAL ANALYSIS**
-[Analyze the vocabulary, terminology, and specific words used. Look for inflammatory language, coded language, or terms commonly associated with radical ideologies.]
+Your analysis should be objective and consider contextual factors.
 
-**EMOTION AND SENTIMENT**
-[Analyze the emotional tone, sentiment patterns, and psychological appeals used in the content.]
+ENGLISH TRANSCRIPT:
+${transcript.english.slice(0, 8000)}
 
-**SPEECH PATTERNS AND INTENSITY**
-[Examine delivery style, repetition, emphasis patterns, and overall intensity of messaging.]
+HINDI TRANSCRIPT:
+${transcript.hindi.slice(0, 8000)}
+`;
 
-**USE OF RELIGIOUS RHETORIC**
-[Identify any religious references, scriptural citations, or theological arguments that might be used to justify extreme positions.]
-
-**FREQUENCY OF COMMANDS AND DIRECTIVES**
-[Count and analyze any direct calls to action, commands, or directives given to the audience.]
-
-**OVERALL ASSESSMENT**
-[Provide a summary of your findings and overall risk assessment.]
-
-**RISK FACTORS**
-- [List specific concerning elements found]
-- [Use bullet points for each risk factor]
-
-Please provide scores from 0-100 for:
-- Radical Probability: [score]
-- Radical Content: [score]
-
-Be thorough but objective in your analysis.
-    `;
-
+    console.log(`[ANALYSIS] Sending analysis request to OpenAI`);
     const response = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 2000,
+      model: 'gpt-4-0125-preview',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an expert analyst specializing in identifying radical content in speech transcripts. Your task is to objectively analyze transcripts and determine if they contain radical elements.',
+        },
+        { role: 'user', content: prompt },
+      ],
       temperature: 0.3,
+      max_tokens: 1500,
     });
 
-    const analysis = response.choices[0]?.message?.content || '';
-    console.log(`[ANALYSIS] SUCCESS: OpenAI analysis completed`);
+    console.log(`[ANALYSIS] Received response from OpenAI`);
+    if (!response.choices?.[0]?.message) {
+      throw new Error('Invalid response from OpenAI');
+    }
 
-    // Parse the analysis
-    const radicalProbabilityMatch = analysis.match(/Radical Probability:\s*(\d+)/i);
-    const radicalContentMatch = analysis.match(/Radical Content:\s*(\d+)/i);
+    const analysisText = response.choices[0].message.content || '';
+    console.log(`[ANALYSIS] Analysis text length: ${analysisText.length} chars`);
 
-    const radicalProbability = radicalProbabilityMatch ? parseInt(radicalProbabilityMatch[1]) : 30;
-    const radicalContent = radicalContentMatch ? parseInt(radicalContentMatch[1]) : 25;
+    // Extract scores
+    let radicalProbability = 50;
+    let radicalContent = 50;
+
+    const probabilityMatch = analysisText.match(/Radical Probability.*?(\d+)/i);
+    const contentMatch = analysisText.match(/Radical Content.*?(\d+)/i);
+
+    if (probabilityMatch && probabilityMatch[1]) {
+      radicalProbability = parseInt(probabilityMatch[1], 10);
+    }
+    if (contentMatch && contentMatch[1]) {
+      radicalContent = parseInt(contentMatch[1], 10);
+    }
+
+    const overallScore = Math.max(radicalProbability, radicalContent);
+    const scoreLabel = getScoreLabel(radicalProbability, radicalContent);
+    const scoreColor = getScoreColor(radicalProbability, radicalContent);
 
     // Extract sections
-    const lexicalAnalysis = extractSection(analysis, 'LEXICAL ANALYSIS');
-    const emotionAnalysis = extractSection(analysis, 'EMOTION AND SENTIMENT');
-    const speechPatterns = extractSection(analysis, 'SPEECH PATTERNS AND INTENSITY');
-    const religiousRhetoric = extractSection(analysis, 'USE OF RELIGIOUS RHETORIC');
-    const commandsDirectives = extractSection(analysis, 'FREQUENCY OF COMMANDS AND DIRECTIVES');
-    const overallAssessment = extractSection(analysis, 'OVERALL ASSESSMENT');
+    const lexicalAnalysis = extractSection(analysisText, 'Lexical Analysis');
+    const emotionAnalysis = extractSection(analysisText, 'Emotion and Sentiment');
+    const speechPatterns = extractSection(analysisText, 'Speech Patterns and Intensity');
+    const religiousRhetoric = extractSection(analysisText, 'Use of Religious Rhetoric');
+    const commandsDirectives = extractSection(analysisText, 'Frequency of Commands and Directives');
 
-    // Extract risk factors
-    const riskFactors = extractRiskFactors(analysis);
+    // Extract risk factors and safety tips
+    let riskFactors = extractRiskFactors(analysisText);
+    let safetyTips = generateSafetyTips(radicalProbability, radicalContent);
 
-    // Generate safety tips
-    const safetyTips = generateSafetyTips(radicalProbability, radicalContent);
+    let overallAssessment = `This content has been analyzed for radical elements with an overall concern level of ${scoreLabel.toLowerCase()}. The radical probability score is ${radicalProbability}/100, and the radical content score is ${radicalContent}/100.`;
 
-    return {
+    let analysis = {
       radicalProbability,
       radicalContent,
       overallScore: {
-        score: Math.round((radicalProbability + radicalContent) / 2),
-        label: getScoreLabel(radicalProbability, radicalContent),
-        color: getScoreColor(radicalProbability, radicalContent)
+        score: overallScore,
+        label: scoreLabel,
+        color: scoreColor,
       },
       lexicalAnalysis,
       emotionAnalysis,
@@ -333,46 +352,73 @@ Be thorough but objective in your analysis.
       commandsDirectives,
       overallAssessment,
       riskFactors,
-      safetyTips
+      safetyTips,
     };
+
+    // ------------------------------------------------
+    // CLEANUP: REMOVE "**" AND FILTER OUT DUPLICATES
+    // ------------------------------------------------
+    analysis.lexicalAnalysis = removeAsterisks(analysis.lexicalAnalysis);
+    analysis.emotionAnalysis = removeAsterisks(analysis.emotionAnalysis);
+    analysis.speechPatterns = removeAsterisks(analysis.speechPatterns);
+    analysis.religiousRhetoric = removeAsterisks(analysis.religiousRhetoric);
+    analysis.commandsDirectives = removeAsterisks(analysis.commandsDirectives);
+    analysis.overallAssessment = removeAsterisks(analysis.overallAssessment);
+
+    analysis.riskFactors = analysis.riskFactors
+      .map((r: string) => removeAsterisks(r))
+      .filter((r: string) => shouldKeepRiskFactor(r));
+
+    analysis.safetyTips = analysis.safetyTips.map((tip: string) => removeAsterisks(tip));
+
+    return analysis;
   } catch (error) {
-    console.error(`[ANALYSIS] ERROR: OpenAI analysis failed: ${error}`);
-    throw new Error('Failed to analyze transcript with AI');
+    console.error(`[ANALYSIS] ERROR: Failed to analyze transcript: ${error}`);
+    return {
+      radicalProbability: 0,
+      radicalContent: 0,
+      overallScore: {
+        score: 0,
+        label: 'Error',
+        color: 'gray',
+      },
+      lexicalAnalysis: 'Error analyzing content',
+      emotionAnalysis: 'Error analyzing content',
+      speechPatterns: 'Error analyzing content',
+      religiousRhetoric: 'Error analyzing content',
+      commandsDirectives: 'Error analyzing content',
+      overallAssessment: 'An error occurred during analysis.',
+      riskFactors: ['Analysis error'],
+      safetyTips: ['Try again later'],
+    };
   }
 }
 
-// Helper function to extract sections from analysis text
+// -----------------------------
+// HELPER FUNCTION: EXTRACT SECTION FROM ANALYSIS TEXT
+// -----------------------------
 function extractSection(text: string, sectionName: string): string {
-  const regex = new RegExp(`\\*\\*${sectionName}\\*\\*([\\s\\S]*?)(?=\\*\\*|$)`, 'i');
+  const regex = new RegExp(`${sectionName}[:\\s]+(.*?)(?=\\n\\s*\\n|\\n\\s*[A-Z]|$)`, 'si');
   const match = text.match(regex);
-  return match ? removeAsterisks(match[1].trim()) : `${sectionName} analysis not available.`;
+  return match && match[1] ? match[1].trim() : `No ${sectionName.toLowerCase()} found.`;
 }
 
-// Helper function to extract risk factors
+// -----------------------------
+// HELPER FUNCTION: EXTRACT RISK FACTORS FROM ANALYSIS TEXT
+// -----------------------------
 function extractRiskFactors(text: string): string[] {
   const factors: string[] = [];
-  
-  // Look for the RISK FACTORS section
-  const riskFactorsMatch = text.match(/\*\*RISK FACTORS\*\*([^*]+)/i);
-  if (riskFactorsMatch) {
-    const riskSection = riskFactorsMatch[1];
-    
-    // Extract bullet points or lines that start with -
-    const lines = riskSection.split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('-') || trimmed.startsWith('•')) {
-        const factor = trimmed.replace(/^[-•]\s*/, '').trim();
-        if (factor.length > 5 && shouldKeepRiskFactor(factor)) {
-          factors.push(factor);
-        }
-      }
+  const listItemRegex = /[-*•]\s+([^•\n]+)/g;
+  let match;
+
+  while ((match = listItemRegex.exec(text)) !== null) {
+    if (match[1] && match[1].trim().length > 10) {
+      factors.push(match[1].trim());
     }
   }
 
-  // If no list items found, try extracting key phrases
   if (factors.length === 0) {
-    const keywords = ["concern", "warning", "caution", "problematic", "radical", "extreme"];
+    const keywords = ['concern', 'warning', 'caution', 'problematic', 'radical', 'extreme'];
     for (const keyword of keywords) {
       const keywordRegex = new RegExp(`[^.!?]*${keyword}[^.!?]*[.!?]`, 'gi');
       let keywordMatch;
@@ -386,123 +432,103 @@ function extractRiskFactors(text: string): string[] {
     }
   }
 
-  // If still no factors, create generic ones
   if (factors.length === 0) {
-    factors.push("Potential radical content detected");
-    factors.push("Review content for harmful messaging");
+    factors.push('Potential radical content detected');
+    factors.push('Review content for harmful messaging');
   }
 
   return factors.slice(0, 5);
 }
 
-// Helper function to generate safety tips
+// -----------------------------
+// HELPER FUNCTION: GENERATE SAFETY TIPS
+// -----------------------------
 function generateSafetyTips(radicalProbability: number, radicalContent: number): string[] {
   const tips = [
-    "Consider the broader context before drawing conclusions",
-    "Verify claims with established and reliable sources",
-    "Be aware of emotional manipulation in content",
-    "Recognize that strong opinions are not necessarily radical",
-    "Seek diverse perspectives on controversial topics"
+    'Consider the broader context before drawing conclusions',
+    'Verify claims with established and reliable sources',
+    'Be aware of emotional manipulation in content',
+    'Recognize that strong opinions are not necessarily radical',
+    'Seek diverse perspectives on controversial topics',
   ];
 
   if (radicalProbability > 70 || radicalContent > 70) {
-    tips.push("Approach this content with critical thinking");
-    tips.push("Be cautious about sharing potentially harmful content");
+    tips.push('Approach this content with critical thinking');
+    tips.push('Be cautious about sharing potentially harmful content');
   }
 
   return tips.slice(0, 5);
 }
 
-// Main function to process uploaded video file
+// -----------------------------
+// MAIN FUNCTION: PROCESS VIDEO FILE (updated)
+// -----------------------------
 async function processVideoFile(file: File): Promise<any> {
   try {
     console.log(`[PROCESS] Starting video file analysis for: ${file.name}`);
 
-    // Step 1: Save uploaded file (skipping download step)
-    console.log(`[PROCESS] Step 1: Saving uploaded file`);
+    /* Step 1: Save uploaded file */
     const videoPath = await saveUploadedFile(file);
-
-    // Step 2: Extract audio
-    console.log(`[PROCESS] Step 2: Extracting audio`);
+    
+    /* Step 2: Extract audio & Step 3: chunk */
     const audioPath = await extractAudio(videoPath);
-
-    // Step 3: Split audio into chunks
-    console.log(`[PROCESS] Step 3: Splitting audio into chunks`);
     const chunkPaths = await splitAudioToChunks(audioPath);
 
-    // Step 4: Transcribe each chunk in both English & Hindi
-    console.log(`[PROCESS] Step 4: Transcribing audio chunks`);
-    let englishTranscript = '';
-    let hindiTranscript = '';
+    /* Step 4: Upload + transcribe chunks concurrently */
+    const limit = pLimit(8);                // throttle to 8 parallel chunks
+    const results = await Promise.all(
+      chunkPaths.map((chunkPath, idx) =>
+        limit(async () => {
+          console.log(`[PROCESS] Chunk ${idx + 1}/${chunkPaths.length}`);
+          const gcsUri = await uploadToGCS(chunkPath);
+          const [en, hi] = await Promise.all([
+            transcribeAudio(gcsUri, 'en-US'),
+            transcribeAudio(gcsUri, 'hi-IN'),
+          ]);
+          return { en, hi };
+        }),
+      ),
+    );
 
-    for (let i = 0; i < chunkPaths.length; i++) {
-      const chunkPath = chunkPaths[i];
-      console.log(`[PROCESS] Processing chunk ${i+1}/${chunkPaths.length}: ${chunkPath}`);
+    const englishTranscript = results.map(r => r.en).join(' ').trim();
+    const hindiTranscript   = results.map(r => r.hi).join(' ').trim();
 
-      const gcsUri = await uploadToGCS(chunkPath);
+    console.log(`[PROCESS] Transcription complete: EN ${englishTranscript.length} chars, HI ${hindiTranscript.length} chars`);
 
-      // Parallel transcription
-      console.log(`[PROCESS] Transcribing chunk ${i+1} in parallel (English and Hindi)`);
-      const [englishChunk, hindiChunk] = await Promise.all([
-        transcribeAudio(gcsUri, 'en-US'),
-        transcribeAudio(gcsUri, 'hi-IN')
-      ]);
+    /* Step 5: OpenAI analysis */
+    const analysis = await analyzeTranscript({ english: englishTranscript, hindi: hindiTranscript });
 
-      englishTranscript += englishChunk + ' ';
-      hindiTranscript += hindiChunk + ' ';
-    }
-
-    console.log(`[PROCESS] Transcription completed`);
-    console.log(`[PROCESS] English transcript length: ${englishTranscript.length} chars`);
-    console.log(`[PROCESS] Hindi transcript length: ${hindiTranscript.length} chars`);
-
-    // Step 5: Analyze transcript with OpenAI
-    console.log(`[PROCESS] Step 5: Analyzing transcript with OpenAI`);
-    const analysis = await analyzeTranscript({
-      english: englishTranscript.trim(),
-      hindi: hindiTranscript.trim()
-    });
-
-    // Create video details
-    const videoTitle = file.name.replace(/\.[^/.]+$/, ""); // Remove file extension
-    const videoDuration = 0; // Could be improved with real metadata
-
-    // Generate a unique analysis ID
+    /* Step 6: build & return response */
     const analysisId = `video-file-analysis-${uuidv4()}`;
-
-    // Step 6: Format and return the result
-    console.log(`[PROCESS] Step 6: Formatting final result with ID: ${analysisId}`);
-    const result = {
-      type: "video",
-      analysisId: analysisId,
+    const result: VideoAnalysisResult = {
+      type: 'video',
+      analysisId,
       url: `file://${file.name}`,
       lastAnalyzedAt: new Date().toISOString(),
       feedbackGiven: false,
       success: true,
-      message: "Video file analysis completed successfully",
+      message: 'Video file analysis completed successfully',
       inputParameters: {
-        videoTitle: videoTitle,
-        videoDuration: videoDuration || 0,
-        transcription: {
-          english: englishTranscript,
-          hindi: hindiTranscript
-        }
+        videoTitle: file.name.replace(/\.[^/.]+$/, ""),
+        videoDuration: 0,
+        transcription: { english: englishTranscript, hindi: hindiTranscript },
       },
-      outputParameters: analysis
+      outputParameters: analysis,
     };
 
-    // Cleanup files
     console.log(`[PROCESS] Cleaning up temporary files`);
     cleanupFiles([videoPath, audioPath, ...chunkPaths]);
 
     return result;
   } catch (error) {
-    console.error(`[PROCESS] ERROR: Video file analysis process failed: ${error}`);
+    console.error(`[PROCESS] ERROR: ${error}`);
     throw error;
   }
 }
 
-// Helper function to determine score label
+// -----------------------------
+// HELPER FUNCTION: DETERMINE SCORE LABEL
+// -----------------------------
 function getScoreLabel(radicalProbability: number, radicalContent: number): string {
   const avgScore = (radicalProbability + radicalContent) / 2;
   if (avgScore >= 70) {
@@ -514,7 +540,9 @@ function getScoreLabel(radicalProbability: number, radicalContent: number): stri
   }
 }
 
-// Helper function to determine score color
+// -----------------------------
+// HELPER FUNCTION: DETERMINE SCORE COLOR
+// -----------------------------
 function getScoreColor(radicalProbability: number, radicalContent: number): string {
   const avgScore = (radicalProbability + radicalContent) / 2;
   if (avgScore >= 70) {
@@ -526,11 +554,13 @@ function getScoreColor(radicalProbability: number, radicalContent: number): stri
   }
 }
 
-// Helper function to clean up files
+// -----------------------------
+// HELPER FUNCTION: CLEAN UP FILES
+// -----------------------------
 function cleanupFiles(filePaths: string[]): void {
   console.log(`[CLEANUP] Starting cleanup of ${filePaths.length} files`);
 
-  filePaths.forEach(filePath => {
+  filePaths.forEach((filePath) => {
     try {
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
@@ -546,6 +576,9 @@ function cleanupFiles(filePaths: string[]): void {
   console.log(`[CLEANUP] Cleanup completed`);
 }
 
+// -----------------------------
+// API ROUTE: POST HANDLER
+// -----------------------------
 export async function POST(request: Request) {
   try {
     console.log(`[API] Received video file analysis request`);
@@ -560,7 +593,6 @@ export async function POST(request: Request) {
 
     console.log(`[API] Processing video file: ${file.name}, size: ${file.size} bytes`);
 
-    // Process video file
     const result = await processVideoFile(file);
 
     console.log(`[API] SUCCESS: Video file analysis completed, returning results`);

@@ -219,71 +219,50 @@ async function extractAudio(videoPath: string): Promise<string> {
 }
 
 // -----------------------------
-// HELPER FUNCTION: SPLIT AUDIO INTO CHUNKS (FLUENT-FFMPEG)
+// HELPER FUNCTION: SPLIT AUDIO INTO CHUNKS  (Option A – re-encode each segment)
 // -----------------------------
 async function splitAudioToChunks(
   audioPath: string,
-  chunkDurationMs: number = 60_000
+  chunkDurationMs: number = 60_000,    // keep existing signature
 ): Promise<string[]> {
-  const audioId = path.basename(audioPath, path.extname(audioPath));
-  const chunkDurationSeconds = chunkDurationMs / 1000;
-
-  console.log(`[AUDIO SPLITTING] Starting to split ${audioPath} into ${chunkDurationSeconds}s chunks`);
+  const base     = path.basename(audioPath, path.extname(audioPath));
+  const pattern  = path.join(chunksDir, `${base}_chunk_%03d.wav`);
+  const chunkSec = chunkDurationMs / 1000;
 
   return new Promise((resolve, reject) => {
-    const chunkPaths: string[] = [];
-    let chunkIndex = 0;
+    ffmpeg(audioPath)
+      /* Re-encode so every output file is 16-kHz, mono, LINEAR16 PCM */
+      .audioCodec('pcm_s16le')
+      .audioFrequency(16000)
+      .audioChannels(1)
+      .outputOptions([
+        '-f', 'segment',                // segment muxer: one pass
+        '-segment_time', String(chunkSec),
+      ])
+      .output(pattern)
+      .on('start', (cmd: string) =>
+        console.log(`[AUDIO SPLITTING] ffmpeg command: ${cmd}`),
+      )
+      .on('end', () => {
+        // collect all created chunk paths in order
+        const chunks = fs
+          .readdirSync(chunksDir)
+          .filter((f) => f.startsWith(`${base}_chunk_`))
+          .sort()
+          .map((f) => path.join(chunksDir, f));
 
-    function processNextChunk(startTime: number) {
-      const chunkPath = path.join(chunksDir, `${audioId}_chunk_${String(chunkIndex).padStart(3, '0')}.wav`);
-      
-      ffmpeg(audioPath)
-        .seekInput(startTime)
-        .duration(chunkDurationSeconds)
-        .audioCodec('pcm_s16le')
-        .audioFrequency(16000)
-        .audioChannels(1)
-        .output(chunkPath)
-        .on('start', (commandLine: string) => {
-          console.log(`[AUDIO SPLITTING] Processing chunk ${chunkIndex}: ${commandLine}`);
-        })
-        .on('end', () => {
-          chunkPaths.push(chunkPath);
-          chunkIndex++;
-          
-          // Check if there's more audio to process
-          const nextStartTime = startTime + chunkDurationSeconds;
-          
-          // Get audio duration to check if we need more chunks
-          ffmpeg.ffprobe(audioPath, (err: Error | null, metadata: any) => {
-            if (err) {
-              reject(new Error(`Failed to get audio metadata: ${err.message}`));
-              return;
-            }
-            
-            const totalDuration = metadata.format.duration || 0;
-            
-            if (nextStartTime < totalDuration) {
-              // Process next chunk
-              processNextChunk(nextStartTime);
-            } else {
-              // All chunks processed
-              console.log(`[AUDIO SPLITTING] SUCCESS: Created ${chunkPaths.length} audio chunks`);
-              resolve(chunkPaths);
-            }
-          });
-        })
-        .on('error', (err: Error) => {
-          console.error(`[AUDIO SPLITTING] ERROR processing chunk ${chunkIndex}: ${err.message}`);
-          reject(new Error(`Failed to split audio: ${err.message}`));
-        })
-        .run();
-    }
-
-    // Start processing from the beginning
-    processNextChunk(0);
+        console.log(
+          `[AUDIO SPLITTING] SUCCESS: created ${chunks.length} chunks`,
+        );
+        resolve(chunks);
+      })
+      .on('error', (err: Error) =>
+        reject(new Error(`Failed to split audio: ${err.message}`)),
+      )
+      .run();
   });
 }
+
 
 // -----------------------------
 // HELPER FUNCTION: UPLOAD AUDIO TO GCS
@@ -563,91 +542,71 @@ function generateSafetyTips(radicalProbability: number, radicalContent: number):
   return tips.slice(0, 5);
 }
 
-// -----------------------------
-// MAIN FUNCTION: PROCESS VIDEO URL
-// -----------------------------
+import pLimit from 'p-limit';
+
+/* --------------------------------------------
+   MAIN FUNCTION: PROCESS VIDEO URL (updated)
+---------------------------------------------*/
 async function processVideoUrl(url: string): Promise<any> {
   try {
-    console.log(`[PROCESS] Starting video analysis process for URL: ${url}`);
+    console.log(`[PROCESS] Starting video analysis for URL: ${url}`);
 
-    // Step 1: Download audio
-    console.log(`[PROCESS] Step 1: Downloading audio`);
-    const audioPath = await downloadAudio(url);
-
-    // Step 2: Split audio into chunks
-    console.log(`[PROCESS] Step 2: Splitting audio into chunks`);
+    /* Step 1: download & Step 2: chunk exactly as before */
+    const audioPath  = await downloadAudio(url);
     const chunkPaths = await splitAudioToChunks(audioPath);
 
-    // Step 3: Transcribe each chunk in both English & Hindi
-    console.log(`[PROCESS] Step 3: Transcribing audio chunks`);
-    let englishTranscript = '';
-    let hindiTranscript = '';
+    /* Step 3: Upload + transcribe chunks concurrently */
+    const limit      = pLimit(8);                // throttle to 8 parallel chunks
+    const results    = await Promise.all(
+      chunkPaths.map((chunkPath, idx) =>
+        limit(async () => {
+          console.log(`[PROCESS] Chunk ${idx + 1}/${chunkPaths.length}`);
+          const gcsUri = await uploadToGCS(chunkPath);
+          const [en, hi] = await Promise.all([
+            transcribeAudio(gcsUri, 'en-US'),
+            transcribeAudio(gcsUri, 'hi-IN'),
+          ]);
+          return { en, hi };
+        }),
+      ),
+    );
 
-    for (let i = 0; i < chunkPaths.length; i++) {
-      const chunkPath = chunkPaths[i];
-      console.log(`[PROCESS] Processing chunk ${i + 1}/${chunkPaths.length}: ${chunkPath}`);
+    const englishTranscript = results.map(r => r.en).join(' ').trim();
+    const hindiTranscript   = results.map(r => r.hi).join(' ').trim();
 
-      const gcsUri = await uploadToGCS(chunkPath);
+    console.log(`[PROCESS] Transcription complete: EN ${englishTranscript.length} chars, HI ${hindiTranscript.length} chars`);
 
-      console.log(`[PROCESS] Transcribing chunk ${i + 1} in parallel (English and Hindi)`);
-      const [englishChunk, hindiChunk] = await Promise.all([
-        transcribeAudio(gcsUri, 'en-US'),
-        transcribeAudio(gcsUri, 'hi-IN'),
-      ]);
+    /* Step 4: OpenAI analysis (unchanged) */
+    const analysis = await analyzeTranscript({ english: englishTranscript, hindi: hindiTranscript });
 
-      englishTranscript += englishChunk + ' ';
-      hindiTranscript += hindiChunk + ' ';
-    }
-
-    console.log(`[PROCESS] Transcription completed`);
-    console.log(`[PROCESS] English transcript length: ${englishTranscript.length} chars`);
-    console.log(`[PROCESS] Hindi transcript length: ${hindiTranscript.length} chars`);
-
-    // Step 4: Analyze transcript with OpenAI
-    console.log(`[PROCESS] Step 4: Analyzing transcript with OpenAI`);
-    const analysis = await analyzeTranscript({
-      english: englishTranscript.trim(),
-      hindi: hindiTranscript.trim(),
-    });
-
-    // Create video details
-    const videoTitle = url.split('/').pop() || 'Unknown Video';
-    const videoDuration = 0; // Could be improved with real metadata
-
-    // Generate a unique analysis ID
+    /* Step 5: build & return response (unchanged) */
     const analysisId = `video-analysis-${uuidv4()}`;
-
-    // Step 5: Format and return the result
-    console.log(`[PROCESS] Step 5: Formatting final result with ID: ${analysisId}`);
     const result: VideoAnalysisResult = {
       type: 'video',
-      analysisId: analysisId,
-      url: url,
+      analysisId,
+      url,
       lastAnalyzedAt: new Date().toISOString(),
       feedbackGiven: false,
       success: true,
       message: 'Video analysis completed successfully',
       inputParameters: {
-        videoTitle: videoTitle,
-        videoDuration: videoDuration || 0,
-        transcription: {
-          english: englishTranscript,
-          hindi: hindiTranscript,
-        },
+        videoTitle: url.split('/').pop() || 'Unknown Video',
+        videoDuration: 0,
+        transcription: { english: englishTranscript, hindi: hindiTranscript },
       },
       outputParameters: analysis,
     };
 
-    // Cleanup files
     console.log(`[PROCESS] Cleaning up temporary files`);
     cleanupFiles([audioPath, ...chunkPaths]);
 
     return result;
   } catch (error) {
-    console.error(`[PROCESS] ERROR: Video analysis process failed: ${error}`);
+    console.error(`[PROCESS] ERROR: ${error}`);
     throw error;
   }
 }
+
 
 // -----------------------------
 // HELPER FUNCTION: DETERMINE SCORE LABEL
